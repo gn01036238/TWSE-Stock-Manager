@@ -47,6 +47,14 @@ export function getSessionProgress(now: Date = new Date()): number {
   return Math.min(1, Math.max(elapsed / SESSION_MINUTES, 1 / SESSION_MINUTES));
 }
 
+/**
+ * 台北時間是否已過某個整點。收盤資料（法人、分點）最早也要收盤後才會出來，
+ * 用這個避免整個上午都在空轉重抓。
+ */
+export function isAfterTaipeiHour(hour: number, now: Date = new Date()): boolean {
+  return taipeiClock(now).minutes >= hour * 60;
+}
+
 /** 台北時區的 YYYY-MM-DD */
 export function taipeiDateKey(date: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -55,6 +63,25 @@ export function taipeiDateKey(date: Date = new Date()): string {
     month: '2-digit',
     day: '2-digit',
   }).format(date);
+}
+
+/**
+ * 最新交易日（台北時區 YYYY-MM-DD）。盤前與週末會退回上一個交易日，
+ * 這樣「今日買入」的判斷才不會在星期六把週五的成交當成昨天的持股。
+ * 註：同 getMarketStatus，不含國定假日；有行情資料回傳的交易日時以那個為準。
+ */
+export function latestTradingDateKey(now: Date = new Date()): string {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  // 盤前的「今天」還沒開盤，基準日要算前一個交易日
+  let cursor = getMarketStatus(now) === 'pre' ? new Date(now.getTime() - DAY_MS) : now;
+
+  for (let i = 0; i < 7; i++) {
+    const { weekday } = taipeiClock(cursor);
+    if (weekday !== 'Sat' && weekday !== 'Sun') break;
+    cursor = new Date(cursor.getTime() - DAY_MS);
+  }
+
+  return taipeiDateKey(cursor);
 }
 
 export const MARKET_STATUS_LABEL: Record<MarketStatus, string> = {

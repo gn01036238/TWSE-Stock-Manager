@@ -29,6 +29,18 @@ export interface Holding {
   avgCost: number;
   totalCost: number;
   currentPrice: number;
+  /** 前一交易日收盤價；報價抓不到時為 0 */
+  previousClose: number;
+  /** 今日損益的基準值：昨日持股 × 昨收 ＋ 今日買進批次 × 成交價；算不出來時為 0 */
+  dayBasis: number;
+  /** 今日損益 = 持股現值 − dayBasis（未計手續費）；算不出來時為 0 */
+  dayChange: number;
+  /** 今日損益中來自昨日持股的部分（現價 − 昨收） */
+  dayChangeHeld: number;
+  /** 今日損益中來自今日買進批次的部分（現價 − 成交價） */
+  dayChangeToday: number;
+  /** 今日買進且還留著的股數；成交價明顯不在今天區間的紀錄不算在內 */
+  todayShares: number;
   marketValue: number;
   unrealizedGain: number;
   unrealizedGainPercent: number;
@@ -83,6 +95,15 @@ export interface InstitutionalFlow {
   total: number;
 }
 
+/** 主力（買超前 15 大券商 − 賣超前 15 大券商）單日買賣超，單位：張 */
+export interface MajorTraderFlow {
+  net: number;
+  buy: number | null;
+  sell: number | null;
+  /** 分點資料所屬交易日，台北時區 YYYY-MM-DD */
+  date: string | null;
+}
+
 /** 價量型態：價漲/價跌 × 量增/量縮 */
 export type PriceVolumePattern =
   | 'up-expand'
@@ -105,11 +126,17 @@ export interface ChipRow {
   /** 買賣超；個股單位張，大盤單位億元 */
   flow: InstitutionalFlow | null;
   flowUnit: 'lot' | 'yi';
+  /** 主力買賣超（張）；加權指數列沒有分點資料，固定為 null */
+  major: MajorTraderFlow | null;
 }
 
 export interface ChipsResponse {
+  /** 最新交易日（台北時區 YYYY-MM-DD），用來判斷收盤資料是不是還落後一天 */
+  tradingDate: string | null;
   /** 三大法人資料所屬交易日，台北時區 YYYY-MM-DD */
   flowDate: string | null;
+  /** 主力（券商分點）資料所屬交易日，台北時區 YYYY-MM-DD */
+  majorDate: string | null;
   rows: ChipRow[];
   /** 加權指數彙總列 */
   market: ChipRow | null;
@@ -143,6 +170,10 @@ export interface PortfolioSummary {
   totalMarketValue: number;
   totalUnrealizedGain: number;
   totalUnrealizedGainPercent: number;
+  /** 今日損益合計（今日買進的部位以成交價為基準） */
+  totalDayChange: number;
+  /** 今日損益 ÷ 今日基準值 */
+  totalDayChangePercent: number;
   totalRealizedGain: number;
   totalDividends: number;
   holdingsCount: number;

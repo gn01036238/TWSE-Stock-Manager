@@ -6,17 +6,19 @@ import { usePrices } from './usePrices';
 import { useIntraday } from './useIntraday';
 import { useDividends } from './useDividends';
 import { computeHoldings, computeRealizedGains, computePortfolioSummary } from '@/lib/calculations';
+import { latestTradingDateKey } from '@/lib/market';
 import type { Holding, PortfolioSummary, RealizedGain, StockPrice } from '@/types';
 
 export function useHoldings() {
   const { data: txData, isLoading: txLoading, error: txError } = useTransactions();
+  const transactions = txData?.transactions;
 
   // Get unique tickers from transactions
   const tickers = useMemo(() => {
-    if (!txData?.transactions) return [];
-    const set = new Set(txData.transactions.map((t) => t.ticker));
+    if (!transactions) return [];
+    const set = new Set(transactions.map((t) => t.ticker));
     return Array.from(set);
-  }, [txData?.transactions]);
+  }, [transactions]);
 
   const {
     data: prices,
@@ -30,9 +32,19 @@ export function useHoldings() {
   // 日內走勢圖資料。刻意不列入 isLoading，避免走勢圖拖慢整頁顯示
   const { data: intraday } = useIntraday(tickers);
 
+  // 今日損益要知道哪些交易是「今天買的」。走勢圖回傳的交易日最準（含國定假日），
+  // 沒拿到時退回用台北時間推算
+  const tradingDate = useMemo(() => {
+    const dates = Object.values(intraday ?? {})
+      .map((series) => series?.tradingDate)
+      .filter((date): date is string => !!date)
+      .sort();
+    return dates.at(-1) ?? latestTradingDateKey();
+  }, [intraday]);
+
   // Compute holdings, realized gains, and portfolio summary
   const { holdings, realizedGains, summary } = useMemo(() => {
-    if (!txData?.transactions || !prices) {
+    if (!transactions || !prices) {
       return {
         holdings: [] as Holding[],
         realizedGains: [] as RealizedGain[],
@@ -41,6 +53,8 @@ export function useHoldings() {
           totalMarketValue: 0,
           totalUnrealizedGain: 0,
           totalUnrealizedGainPercent: 0,
+          totalDayChange: 0,
+          totalDayChangePercent: 0,
           totalRealizedGain: 0,
           totalDividends: 0,
           holdingsCount: 0,
@@ -69,12 +83,13 @@ export function useHoldings() {
     });
 
     const holdings = computeHoldings(
-      txData.transactions,
+      transactions,
       pricesMap,
       dividendsByTicker,
-      dividendPerShareByTicker
+      dividendPerShareByTicker,
+      tradingDate
     );
-    const realizedGains = computeRealizedGains(txData.transactions, stockNames);
+    const realizedGains = computeRealizedGains(transactions, stockNames);
     const summary = computePortfolioSummary(holdings, realizedGains);
 
     // Add dividends to summary
@@ -82,7 +97,7 @@ export function useHoldings() {
     summary.totalDividends = totalDividends;
 
     return { holdings, realizedGains, summary };
-  }, [txData?.transactions, prices, dividendsData]);
+  }, [transactions, prices, dividendsData, tradingDate]);
 
   return {
     holdings,

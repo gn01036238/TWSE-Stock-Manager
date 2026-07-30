@@ -6,8 +6,6 @@ import { cn } from '@/lib/utils';
 
 const navItems = [
   { href: '/', label: '總覽' },
-  { href: '/holdings', label: '持股' },
-  { href: '/chips', label: '籌碼' },
   { href: '/transactions', label: '交易記錄' },
   { href: '/dividends', label: '股利' },
   { href: '/analytics', label: '分析' },
@@ -19,7 +17,7 @@ export function Navbar() {
 
   return (
     <nav className="border-b bg-card">
-      <div className="container mx-auto px-4">
+      <div className="w-full px-2 sm:px-4">
         <div className="flex h-14 items-center justify-between">
           <Link href="/" className="font-bold text-xl">
             TWSE Stock Manager

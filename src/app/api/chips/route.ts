@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchStockPrices } from '@/lib/twse';
 import { fetchInstitutionalFlows, fetchMarketFlow } from '@/lib/institutional';
+import { fetchMajorTraderFlows } from '@/lib/major';
 import {
   computePricePattern,
   computeVolumeRatio,
@@ -8,7 +9,7 @@ import {
   fetchTaiexSnapshot,
   fetchVolumeStats,
 } from '@/lib/volume';
-import { getSessionProgress } from '@/lib/market';
+import { getSessionProgress, taipeiDateKey } from '@/lib/market';
 import type { ChipRow, ChipsResponse } from '@/types';
 
 /** 加權指數在表格裡借用的代號，對齊各家看盤軟體的習慣 */
@@ -25,10 +26,16 @@ export async function GET(request: NextRequest) {
 
     const progress = getSessionProgress();
 
-    const [prices, volumeStats, daily] = await Promise.all([
+    // 先問加權指數報價，它帶的日期就是「最新交易日」（能避開國定假日誤判），
+    // 後面才知道法人／主力資料是當日的還是還停在前一個交易日
+    const taiex = await fetchTaiexSnapshot();
+    const tradingDate = taiex?.date ?? taipeiDateKey();
+
+    const [prices, volumeStats, daily, major] = await Promise.all([
       fetchStockPrices(tickers),
       fetchVolumeStats(tickers),
-      fetchInstitutionalFlows(),
+      fetchInstitutionalFlows(tradingDate),
+      fetchMajorTraderFlows(tickers, tradingDate),
     ]);
 
     const rows: ChipRow[] = tickers.map((ticker) => {
@@ -51,13 +58,13 @@ export async function GET(request: NextRequest) {
         ),
         flow: daily?.flows.get(ticker) ?? null,
         flowUnit: 'lot',
+        major: major.flows.get(ticker) ?? null,
       };
     });
 
-    const [marketFlow, marketStats, taiex] = await Promise.all([
+    const [marketFlow, marketStats] = await Promise.all([
       daily ? fetchMarketFlow(daily.date) : Promise.resolve(null),
       fetchMarketVolumeStats(),
-      fetchTaiexSnapshot(),
     ]);
 
     const taiexChange = taiex ? taiex.price - taiex.previousClose : null;
@@ -80,11 +87,14 @@ export async function GET(request: NextRequest) {
           ),
           flow: marketFlow,
           flowUnit: 'yi',
+          major: null,
         }
       : null;
 
     const body: ChipsResponse = {
+      tradingDate,
       flowDate: daily?.date ?? null,
+      majorDate: major.date,
       rows,
       market,
     };

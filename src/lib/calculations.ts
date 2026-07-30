@@ -14,19 +14,44 @@ function groupByTicker(transactions: Transaction[]): Map<string, Transaction[]> 
   return grouped;
 }
 
+/**
+ * 日期填今天、但成交價根本不在今天的價格區間內（常見於補登舊交易時日期沒改），
+ * 這種紀錄不能拿成交價當今日損益的基準，否則會把幾個月的價差算成今天賺賠。
+ * 判斷不出今天區間時（沒有報價）一律當成不是今天的交易，維持昨收基準。
+ */
+function isTodayTradePrice(price: number, quote: StockPrice | undefined): boolean {
+  if (!quote) return false;
+
+  const low = Math.min(quote.low, quote.price, quote.previousClose);
+  const high = Math.max(quote.high, quote.price, quote.previousClose);
+  if (!(low > 0) || !(high > 0)) return false;
+
+  // 留一點容差給四捨五入
+  return price >= low * 0.995 && price <= high * 1.005;
+}
+
 // Compute current holdings from transactions
+/**
+ * @param tradingDate 最新交易日（台北時區 YYYY-MM-DD）。用來把當天才買進的股數
+ *   從「今日損益」的昨收基準裡拿掉，改用成交價當基準。不給就全部以昨收計算。
+ */
 export function computeHoldings(
   transactions: Transaction[],
   prices: Map<string, StockPrice>,
   dividendsByTicker: Map<string, number> = new Map(),
-  dividendPerShareByTicker: Map<string, number> = new Map()
+  dividendPerShareByTicker: Map<string, number> = new Map(),
+  tradingDate?: string
 ): Holding[] {
   const byTicker = groupByTicker(transactions);
   const holdings: Holding[] = [];
 
   for (const [ticker, txns] of byTicker) {
+    const priceData = prices.get(ticker);
     let shares = 0;
     let totalCost = 0;
+    // 今日損益的基準：昨日就持有的股數（用昨收）＋ 今日買進的批次（用成交價）
+    let sharesBeforeToday = 0;
+    const todayLots: { quantity: number; price: number }[] = [];
 
     // Sort by date ascending, then BUY before SELL (so same-day trades work correctly)
     const sortedTxns = [...txns].sort((a, b) => {
@@ -39,9 +64,18 @@ export function computeHoldings(
     });
 
     for (const tx of sortedTxns) {
+      // 日期可能帶時間（DB 為 date 欄位，但匯入來源不一），只比對 YYYY-MM-DD
+      const isToday = tradingDate != null && tx.transaction_date.slice(0, 10) === tradingDate;
+
       if (tx.transaction_type === 'BUY') {
         totalCost += tx.quantity * tx.price + (tx.commission || 0);
         shares += tx.quantity;
+
+        if (isToday && isTodayTradePrice(tx.price, priceData)) {
+          todayLots.push({ quantity: tx.quantity, price: tx.price });
+        } else {
+          sharesBeforeToday += tx.quantity;
+        }
       } else if (tx.transaction_type === 'SELL') {
         // Reduce cost proportionally (average cost method)
         if (shares > 0) {
@@ -49,15 +83,44 @@ export function computeHoldings(
           totalCost -= tx.quantity * costPerShare;
           shares -= tx.quantity;
         }
+
+        // 今日損益基準同樣用 FIFO：先賣掉舊持股，再賣今日買進的批次（當沖）
+        let remaining = tx.quantity;
+        const fromBefore = Math.min(remaining, sharesBeforeToday);
+        sharesBeforeToday -= fromBefore;
+        remaining -= fromBefore;
+
+        while (remaining > 0 && todayLots.length > 0) {
+          const lot = todayLots[0];
+          const taken = Math.min(remaining, lot.quantity);
+          lot.quantity -= taken;
+          remaining -= taken;
+          if (lot.quantity <= 0) todayLots.shift();
+        }
       }
     }
 
     // Only include if we still hold shares
     if (shares > 0) {
-      const priceData = prices.get(ticker);
       const currentPrice = priceData?.price || 0;
+      const previousClose = priceData?.previousClose || 0;
       const name = priceData?.name || ticker;
       const marketValue = shares * currentPrice;
+
+      // 今日損益 = 現值 − 今日基準值（昨日持股用昨收，今日買進用成交價，未計手續費）
+      const todayLotShares = todayLots.reduce((sum, lot) => sum + lot.quantity, 0);
+      const todayLotBasis = todayLots.reduce((sum, lot) => sum + lot.quantity * lot.price, 0);
+      // 報價或昨收抓不到時不猜，直接算 0，避免把整段漲跌（或整筆成本）算成今日損益
+      const canComputeDay =
+        currentPrice > 0 && (previousClose > 0 || sharesBeforeToday === 0);
+      const dayBasis = canComputeDay
+        ? sharesBeforeToday * previousClose + todayLotBasis
+        : 0;
+      // 拆成兩段方便畫面說明「這個數字是怎麼來的」
+      const dayChangeHeld =
+        dayBasis > 0 ? sharesBeforeToday * (currentPrice - previousClose) : 0;
+      const dayChangeToday = dayBasis > 0 ? todayLotShares * currentPrice - todayLotBasis : 0;
+      const dayChange = dayChangeHeld + dayChangeToday;
       const unrealizedGain = marketValue - totalCost;
       const totalDividends = dividendsByTicker.get(ticker) || 0;
       const dividendPerShare = dividendPerShareByTicker.get(ticker) || 0;
@@ -72,6 +135,12 @@ export function computeHoldings(
         avgCost: totalCost / shares,
         totalCost,
         currentPrice,
+        previousClose,
+        dayBasis,
+        dayChange,
+        dayChangeHeld,
+        dayChangeToday,
+        todayShares: todayLotShares,
         marketValue,
         unrealizedGain,
         unrealizedGainPercent: totalCost > 0 ? (unrealizedGain / totalCost) * 100 : 0,
@@ -163,12 +232,17 @@ export function computePortfolioSummary(
   const totalUnrealizedGain = holdings.reduce((sum, h) => sum + h.unrealizedGain, 0);
   const totalRealizedGain = realizedGains.reduce((sum, g) => sum + g.gain, 0);
   const totalDividends = holdings.reduce((sum, h) => sum + h.totalDividends, 0);
+  const totalDayChange = holdings.reduce((sum, h) => sum + h.dayChange, 0);
+  // 分母為今日基準值，只計入算得出今日損益的持股，比例才不會被沒報價的部位稀釋
+  const dayBasisValue = holdings.reduce((sum, h) => sum + h.dayBasis, 0);
 
   return {
     totalInvested,
     totalMarketValue,
     totalUnrealizedGain,
     totalUnrealizedGainPercent: totalInvested > 0 ? (totalUnrealizedGain / totalInvested) * 100 : 0,
+    totalDayChange,
+    totalDayChangePercent: dayBasisValue > 0 ? (totalDayChange / dayBasisValue) * 100 : 0,
     totalRealizedGain,
     totalDividends,
     holdingsCount: holdings.length,

@@ -1,4 +1,5 @@
 import type { InstitutionalFlow } from '@/types';
+import { isAfterTaipeiHour } from './market';
 
 /** 三大法人買賣超日報（個股，單位：股） */
 const T86_URL = 'https://www.twse.com.tw/rwd/zh/fund/T86';
@@ -7,7 +8,10 @@ const BFI82U_URL = 'https://www.twse.com.tw/rwd/zh/fund/BFI82U';
 
 /** T86 約在收盤後 16:00 才更新，最多往前找幾個日曆日 */
 const MAX_LOOKBACK_DAYS = 10;
+/** 已經是最新交易日的資料就不會再變了 */
 const CACHE_TTL = 10 * 60 * 1000;
+/** 還停在前一個交易日時縮短快取，當日資料一上線就能盡快換過來 */
+const STALE_CACHE_TTL = 2 * 60 * 1000;
 
 const REQUEST_HEADERS = {
   'User-Agent': 'Mozilla/5.0',
@@ -107,17 +111,25 @@ let flowsCache: { at: number; value: DailyFlows | null } | null = null;
 
 /**
  * 取得「最近一個有三大法人資料的交易日」個股買賣超。
- * 盤中查詢時當日資料還沒出，會自動退回前一個交易日。
+ * 盤中查詢時當日資料還沒出，會自動退回前一個交易日；
+ * 當日資料一上線（約 16:00）就會在下一次查詢換成當日。
+ *
+ * @param tradingDate 最新交易日（台北時區 YYYY-MM-DD），用來判斷資料是不是還落後一天
  */
-export async function fetchInstitutionalFlows(): Promise<DailyFlows | null> {
-  if (flowsCache && Date.now() - flowsCache.at < CACHE_TTL) {
-    return flowsCache.value;
+export async function fetchInstitutionalFlows(
+  tradingDate?: string
+): Promise<DailyFlows | null> {
+  if (flowsCache) {
+    const stale = flowsCache.value?.date !== tradingDate && isAfterTaipeiHour(14);
+    const ttl = stale ? STALE_CACHE_TTL : CACHE_TTL;
+    if (Date.now() - flowsCache.at < ttl) return flowsCache.value;
   }
 
   let result: DailyFlows | null = null;
+  const start = tradingDate ? new Date(`${tradingDate}T12:00:00+08:00`) : new Date();
 
   for (let offset = 0; offset < MAX_LOOKBACK_DAYS; offset++) {
-    const day = new Date(Date.now() - offset * 24 * 60 * 60 * 1000);
+    const day = new Date(start.getTime() - offset * 24 * 60 * 60 * 1000);
     const { key, weekday } = taipeiParts(day);
     if (weekday === 'Sat' || weekday === 'Sun') continue;
 

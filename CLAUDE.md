@@ -17,14 +17,15 @@ TWSE Stock Manager is a web-based portfolio management application for tracking 
 ```
 src/
 ├── app/                    # Next.js App Router pages
-│   ├── api/               # API routes (transactions, prices, import, dividends)
-│   ├── holdings/          # Holdings detail page
+│   ├── api/               # API routes (transactions, prices, import, dividends, chips)
+│   ├── page.tsx           # 總覽：摘要 + 持股/籌碼合併表格（原 holdings、chips 頁已併入）
 │   ├── transactions/      # Transaction list and new transaction form
 │   ├── dividends/         # Dividend tracking
 │   ├── analytics/         # Performance analytics
 │   └── import/            # CSV import
 ├── components/
 │   ├── ui/                # Shadcn/ui components
+│   ├── data-table.tsx     # 欄寬可拖曳、欄位可拖曳排序的表格（設定存 localStorage）
 │   ├── navbar.tsx         # Navigation
 │   └── providers.tsx      # Query client provider
 ├── hooks/                 # Custom React hooks (useHoldings, useTransactions, usePrices, useDividends)
@@ -56,6 +57,8 @@ npm run lint     # Run ESLint
 
 ### Financial Calculations
 - **Cost basis**: FIFO for realized gains, average cost for holdings
+- **今日損益**: 昨日持股以昨收為基準、當日買進的部位以成交價為基準（FIFO 決定賣掉的是哪批），
+  未計手續費；交易日以走勢圖回傳的 tradingDate 為準，取不到時用 `latestTradingDateKey()`
 - **Commission**: min 20 TWD, broker-specific discount rates
 - **Tax**: 0.3% stocks, 0.1% ETFs (tickers starting with "00")
 - **Currency**: TWD, no decimals

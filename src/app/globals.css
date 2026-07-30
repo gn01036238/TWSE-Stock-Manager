@@ -88,6 +88,24 @@
   }
 }
 
+/*
+ * 凍結（sticky）欄位的底色必須不透明，否則會透出從底下捲過去的內容。
+ * hover 與表尾的半透明底色在這裡手動混出來，看起來才跟其他欄位一致。
+ */
+.frozen-cell {
+  background-color: var(--card);
+}
+
+tbody tr:hover > .frozen-cell,
+tfoot .frozen-cell {
+  background-color: color-mix(in oklch, var(--muted) 50%, var(--card));
+}
+
+/* 凍結區塊與可捲動區塊的分界線 */
+.frozen-edge {
+  box-shadow: inset -1px 0 0 var(--border);
+}
+
 /* 報價跳動提示（台股慣例：漲紅跌綠，色碼同 src/lib/colors.ts） */
 @keyframes price-flash-up {
   from {

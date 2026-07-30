@@ -184,6 +184,8 @@ export interface TaiexSnapshot {
   previousClose: number;
   /** 當日累計成交量（張） */
   volume: number | null;
+  /** 報價所屬交易日（台北時區 YYYY-MM-DD）；假日會是前一個交易日 */
+  date: string | null;
 }
 
 /** 盤中加權指數即時報價（mis 的 t00，m 欄位是成交張數） */
@@ -196,7 +198,7 @@ export async function fetchTaiexSnapshot(): Promise<TaiexSnapshot | null> {
     if (!response.ok) throw new Error(`TWSE ${response.status}`);
 
     const data = (await response.json()) as {
-      msgArray?: { z?: string; y?: string; m?: string }[];
+      msgArray?: { z?: string; y?: string; m?: string; d?: string }[];
     };
     const item = data.msgArray?.[0];
     if (!item) return null;
@@ -204,6 +206,8 @@ export async function fetchTaiexSnapshot(): Promise<TaiexSnapshot | null> {
     const price = Number(item.z);
     const previousClose = Number(item.y);
     const volume = Number(item.m);
+    // d 是 "20260730"
+    const day = item.d?.match(/^(\d{4})(\d{2})(\d{2})$/);
 
     if (!Number.isFinite(price) || price <= 0) return null;
 
@@ -211,6 +215,7 @@ export async function fetchTaiexSnapshot(): Promise<TaiexSnapshot | null> {
       price,
       previousClose: Number.isFinite(previousClose) && previousClose > 0 ? previousClose : price,
       volume: Number.isFinite(volume) && volume > 0 ? volume : null,
+      date: day ? `${day[1]}-${day[2]}-${day[3]}` : null,
     };
   } catch (error) {
     console.error('Failed to fetch TAIEX snapshot:', error);
