@@ -12,7 +12,14 @@
       "Bash(npm run build:*)",
       "Bash(npm run db:merger:*)",
       "Bash(npx tsx:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git -C \"I:/Github/TWSE-Stock-Manager\" status)",
+      "Bash(git -C \"I:/Github/TWSE-Stock-Manager\" diff)",
+      "Bash(git -C \"I:/Github/TWSE-Stock-Manager\" log --oneline -5)",
+      "Bash(dir:*)",
+      "Bash(git -C \"I:/Github/TWSE-Stock-Manager\" add package.json scripts/)",
+      "Bash(curl:*)"
     ]
   }
 }

@@ -78,10 +78,14 @@ Two tables in Supabase:
 - `brokers`: id, name, commission_rate, commission_discount
 - `transactions`: id, broker_id, ticker, transaction_date, transaction_type (BUY/SELL), quantity, price, commission, tax, decision_reason
 
+Both tables have RLS enabled with no policies. All DB access goes through server-side
+API routes using the secret (service_role) key, which bypasses RLS. The anon key would
+silently return zero rows — never use it for these tables.
+
 ## Environment Variables
 
 Required in `.env.local`:
 ```
 NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SECRET_KEY=          # sb_secret_... server-side only, bypasses RLS
 ```

@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useTransactions } from './useTransactions';
 import { usePrices } from './usePrices';
+import { useIntraday } from './useIntraday';
 import { useDividends } from './useDividends';
 import { computeHoldings, computeRealizedGains, computePortfolioSummary } from '@/lib/calculations';
 import type { Holding, PortfolioSummary, RealizedGain, StockPrice } from '@/types';
@@ -17,8 +18,17 @@ export function useHoldings() {
     return Array.from(set);
   }, [txData?.transactions]);
 
-  const { data: prices, isLoading: pricesLoading } = usePrices(tickers);
+  const {
+    data: prices,
+    isLoading: pricesLoading,
+    isFetching: pricesFetching,
+    dataUpdatedAt: pricesUpdatedAt,
+    refetch: refetchPrices,
+  } = usePrices(tickers);
   const { data: dividendsData, isLoading: dividendsLoading } = useDividends(tickers);
+
+  // 日內走勢圖資料。刻意不列入 isLoading，避免走勢圖拖慢整頁顯示
+  const { data: intraday } = useIntraday(tickers);
 
   // Compute holdings, realized gains, and portfolio summary
   const { holdings, realizedGains, summary } = useMemo(() => {
@@ -45,10 +55,11 @@ export function useHoldings() {
 
     // Calculate dividends per ticker
     const dividendsByTicker = new Map<string, number>();
+    const dividendPerShareByTicker = new Map<string, number>();
     if (dividendsData) {
       for (const [ticker, data] of Object.entries(dividendsData)) {
-        const tickerData = data as { totalIncome: number };
-        dividendsByTicker.set(ticker, tickerData.totalIncome || 0);
+        dividendsByTicker.set(ticker, data.totalIncome || 0);
+        dividendPerShareByTicker.set(ticker, data.dividendPerShare || 0);
       }
     }
 
@@ -57,7 +68,12 @@ export function useHoldings() {
       stockNames.set(ticker, price.name);
     });
 
-    const holdings = computeHoldings(txData.transactions, pricesMap, dividendsByTicker);
+    const holdings = computeHoldings(
+      txData.transactions,
+      pricesMap,
+      dividendsByTicker,
+      dividendPerShareByTicker
+    );
     const realizedGains = computeRealizedGains(txData.transactions, stockNames);
     const summary = computePortfolioSummary(holdings, realizedGains);
 
@@ -75,5 +91,12 @@ export function useHoldings() {
     brokers: txData?.brokers || [],
     isLoading: txLoading || pricesLoading || dividendsLoading,
     error: txError,
+    prices,
+    intraday: intraday ?? {},
+    dividends: dividendsData ?? {},
+    // 即時報價狀態
+    pricesUpdatedAt,
+    isPricesFetching: pricesFetching,
+    refreshPrices: refetchPrices,
   };
 }

@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
       stockName,
       dividends: serializedIncome,
       totalIncome: dividendIncome.reduce((sum, d) => sum + d.income, 0),
+      dividendPerShare: dividendIncome.reduce((sum, d) => sum + d.amount, 0),
     });
   } catch (error) {
     console.error('Dividend fetch error:', error);
@@ -76,10 +77,16 @@ export async function POST(request: NextRequest) {
               paymentDate: d.paymentDate.toISOString(),
             })),
             totalIncome: dividendIncome.reduce((sum, d) => sum + d.income, 0),
+            dividendPerShare: dividendIncome.reduce((sum, d) => sum + d.amount, 0),
           };
         } catch (err) {
           console.error(`Failed to fetch dividends for ${ticker}:`, err);
-          results[ticker] = { error: 'Failed to fetch', dividends: [], totalIncome: 0 };
+          results[ticker] = {
+            error: 'Failed to fetch',
+            dividends: [],
+            totalIncome: 0,
+            dividendPerShare: 0,
+          };
         }
       })
     );

@@ -2,9 +2,22 @@ import { createClient } from '@supabase/supabase-js';
 import type { Broker, Transaction } from '@/types';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// This module is only ever imported from server-side API routes, so we use the
+// secret (service_role) key. It bypasses RLS, which the tables have enabled
+// without any policy — the anon key would silently return zero rows.
+const supabaseKey = process.env.SUPABASE_SECRET_KEY;
+
+if (!supabaseKey) {
+  throw new Error(
+    'SUPABASE_SECRET_KEY is missing. Copy the sb_secret_... key from ' +
+      'Supabase Dashboard → Project Settings → API Keys into .env.local.'
+  );
+}
+
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 // Broker operations
 export async function getBrokers(): Promise<Broker[]> {

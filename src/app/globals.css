@@ -87,3 +87,37 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* 報價跳動提示（台股慣例：漲紅跌綠，色碼同 src/lib/colors.ts） */
+@keyframes price-flash-up {
+  from {
+    background-color: oklch(0.64 0.21 25 / 0.3);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes price-flash-down {
+  from {
+    background-color: oklch(0.72 0.19 149 / 0.3);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.price-flash-up {
+  animation: price-flash-up 1.2s ease-out;
+}
+
+.price-flash-down {
+  animation: price-flash-down 1.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .price-flash-up,
+  .price-flash-down {
+    animation: none;
+  }
+}

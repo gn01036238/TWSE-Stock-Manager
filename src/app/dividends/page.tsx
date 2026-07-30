@@ -129,7 +129,7 @@ export default function DividendsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-2xl font-bold text-red-500">
               {formatCurrency(totalIncome)}
             </div>
           </CardContent>
@@ -230,7 +230,7 @@ export default function DividendsPage() {
                           <TableCell className="text-right">
                             {d.sharesHeld.toLocaleString()}
                           </TableCell>
-                          <TableCell className="text-right font-semibold text-green-600">
+                          <TableCell className="text-right font-semibold text-red-500">
                             {formatCurrency(d.income)}
                           </TableCell>
                         </TableRow>

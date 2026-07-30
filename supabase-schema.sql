@@ -33,8 +33,13 @@ CREATE INDEX IF NOT EXISTS idx_transactions_broker ON transactions(broker_id);
 INSERT INTO brokers (name, commission_rate, commission_discount)
 VALUES
   ('元大證券', 0.001425, 0.6),
-  ('新光證券', 0.001425, 0.6)
+  ('新光證券', 0.001425, 0.1)
 ON CONFLICT DO NOTHING;
+
+-- NOTE: RLS is currently ENABLED on both tables with no policies.
+-- The app reaches them from server-side API routes using SUPABASE_SECRET_KEY,
+-- which bypasses RLS. The statements below are kept only for reference — do not
+-- enable the public policies unless you intend the anon key to read/write data.
 
 -- Enable Row Level Security (optional for single-user app)
 -- ALTER TABLE brokers ENABLE ROW LEVEL SECURITY;

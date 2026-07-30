@@ -148,6 +148,7 @@ export default function TransactionsPage() {
                   <TableHead className="text-right">價格</TableHead>
                   <TableHead className="text-right">金額</TableHead>
                   <TableHead>券商</TableHead>
+                  <TableHead className="min-w-[160px]">決策原因</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -174,6 +175,18 @@ export default function TransactionsPage() {
                     </TableCell>
                     <TableCell>
                       {brokerMap.get(tx.broker_id)?.name || '-'}
+                    </TableCell>
+                    <TableCell className="max-w-[280px]">
+                      {tx.decision_reason ? (
+                        <span
+                          className="block truncate text-sm"
+                          title={tx.decision_reason}
+                        >
+                          {tx.decision_reason}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button

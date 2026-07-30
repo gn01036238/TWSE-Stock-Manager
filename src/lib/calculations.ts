@@ -18,7 +18,8 @@ function groupByTicker(transactions: Transaction[]): Map<string, Transaction[]> 
 export function computeHoldings(
   transactions: Transaction[],
   prices: Map<string, StockPrice>,
-  dividendsByTicker: Map<string, number> = new Map()
+  dividendsByTicker: Map<string, number> = new Map(),
+  dividendPerShareByTicker: Map<string, number> = new Map()
 ): Holding[] {
   const byTicker = groupByTicker(transactions);
   const holdings: Holding[] = [];
@@ -59,6 +60,10 @@ export function computeHoldings(
       const marketValue = shares * currentPrice;
       const unrealizedGain = marketValue - totalCost;
       const totalDividends = dividendsByTicker.get(ticker) || 0;
+      const dividendPerShare = dividendPerShareByTicker.get(ticker) || 0;
+      const adjustedPrice = currentPrice + dividendPerShare;
+      // 含息損益：市值成長 + 已領股利
+      const adjustedGain = shares * adjustedPrice - totalCost;
 
       holdings.push({
         ticker,
@@ -71,6 +76,9 @@ export function computeHoldings(
         unrealizedGain,
         unrealizedGainPercent: totalCost > 0 ? (unrealizedGain / totalCost) * 100 : 0,
         totalDividends,
+        dividendPerShare,
+        adjustedPrice,
+        adjustedGainPercent: totalCost > 0 ? (adjustedGain / totalCost) * 100 : 0,
       });
     }
   }

@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useHoldings } from '@/hooks/useHoldings';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency, formatPercent } from '@/lib/calculations';
+import { DOWN_HEX, UP_HEX, gainTextClass } from '@/lib/colors';
 import {
   PieChart,
   Pie,
@@ -127,7 +128,7 @@ export default function AnalyticsPage() {
           <CardContent>
             <div
               className={`text-2xl font-bold ${
-                summary.totalUnrealizedGain >= 0 ? 'text-green-600' : 'text-red-600'
+                gainTextClass(summary.totalUnrealizedGain)
               }`}
             >
               {formatCurrency(summary.totalUnrealizedGain)}
@@ -146,7 +147,7 @@ export default function AnalyticsPage() {
           <CardContent>
             <div
               className={`text-2xl font-bold ${
-                summary.totalRealizedGain >= 0 ? 'text-green-600' : 'text-red-600'
+                gainTextClass(summary.totalRealizedGain)
               }`}
             >
               {formatCurrency(summary.totalRealizedGain)}
@@ -277,7 +278,7 @@ export default function AnalyticsPage() {
                       {performanceData.map((entry, index) => (
                         <Cell
                           key={`cell-${index}`}
-                          fill={entry.gain >= 0 ? '#22c55e' : '#ef4444'}
+                          fill={entry.gain >= 0 ? UP_HEX : DOWN_HEX}
                         />
                       ))}
                     </Bar>
@@ -307,7 +308,7 @@ export default function AnalyticsPage() {
                         {realizedByStock.map((entry, index) => (
                           <Cell
                             key={`cell-${index}`}
-                            fill={entry.gain >= 0 ? '#22c55e' : '#ef4444'}
+                            fill={entry.gain >= 0 ? UP_HEX : DOWN_HEX}
                           />
                         ))}
                       </Bar>

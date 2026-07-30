@@ -10,11 +10,13 @@ interface DividendData {
     paymentDate: string;
   })[];
   totalIncome: number;
+  /** 持有期間每股累積配息 */
+  dividendPerShare: number;
 }
 
 export function useDividends(tickers: string[]) {
   return useQuery<Record<string, DividendData>>({
-    queryKey: ['dividends', tickers.sort().join(',')],
+    queryKey: ['dividends', [...tickers].sort().join(',')],
     queryFn: async () => {
       if (tickers.length === 0) return {};
 

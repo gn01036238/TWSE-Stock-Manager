@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { href: '/', label: '總覽' },
   { href: '/holdings', label: '持股' },
+  { href: '/chips', label: '籌碼' },
   { href: '/transactions', label: '交易記錄' },
   { href: '/dividends', label: '股利' },
   { href: '/analytics', label: '分析' },
