@@ -75,6 +75,24 @@ export interface IntradaySeries {
   tradingDate: string;
 }
 
+/** 單一交易日的日線（K 棒）；最後一根在盤中還會變動 */
+export interface DailyBar {
+  /** 交易日，台北時區 YYYY-MM-DD */
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  /** 成交量（張）；抓不到時為 null */
+  volume: number | null;
+}
+
+/** 單檔的日 K 序列，舊的在前 */
+export interface CandleSeries {
+  ticker: string;
+  bars: DailyBar[];
+}
+
 /** 總覽的參考指數報價（費半、KOSPI、加權指數…） */
 export interface IndexQuote {
   symbol: string;
@@ -188,6 +206,28 @@ export interface RealizedGain {
   sellPrice: number;
   gain: number;
   gainPercent: number;
+}
+
+/**
+ * 單筆交易的收益狀況。
+ * 賣出：FIFO 配對買入成本算出的已實現損益。
+ * 買入：已被賣掉的部分算已實現，還持有的部分以現價算未實現，兩者相加。
+ */
+export interface TransactionPnL {
+  /** 已實現 + 未實現；算不出來（買入但沒報價、賣出但沒有對應買入紀錄）為 null */
+  gain: number | null;
+  /** gain ÷ 成本基礎 */
+  gainPercent: number | null;
+  /** 已實現部分 */
+  realized: number;
+  /** 未實現部分；沒有現價時為 null */
+  unrealized: number | null;
+  /** 這筆買入已被賣掉的股數（賣出交易為賣出股數中配對到成本的部分） */
+  soldShares: number;
+  /** 這筆買入還持有的股數（賣出交易固定為 0） */
+  heldShares: number;
+  /** 算報酬率的分母 */
+  basis: number;
 }
 
 // API response types

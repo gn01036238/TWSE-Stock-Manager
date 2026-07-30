@@ -1,4 +1,11 @@
-import type { Holding, PortfolioSummary, RealizedGain, StockPrice, Transaction } from '@/types';
+import type {
+  Holding,
+  PortfolioSummary,
+  RealizedGain,
+  StockPrice,
+  Transaction,
+  TransactionPnL,
+} from '@/types';
 
 // Group transactions by ticker
 function groupByTicker(transactions: Transaction[]): Map<string, Transaction[]> {
@@ -12,6 +19,18 @@ function groupByTicker(transactions: Transaction[]): Map<string, Transaction[]> 
   }
 
   return grouped;
+}
+
+/** 日期升冪，同一天買入排在賣出前面（當沖才配對得起來） */
+function sortByTradeOrder(transactions: Transaction[]): Transaction[] {
+  return [...transactions].sort((a, b) => {
+    const dateCompare =
+      new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime();
+    if (dateCompare !== 0) return dateCompare;
+    if (a.transaction_type === 'BUY' && b.transaction_type === 'SELL') return -1;
+    if (a.transaction_type === 'SELL' && b.transaction_type === 'BUY') return 1;
+    return 0;
+  });
 }
 
 /**
@@ -53,15 +72,7 @@ export function computeHoldings(
     let sharesBeforeToday = 0;
     const todayLots: { quantity: number; price: number }[] = [];
 
-    // Sort by date ascending, then BUY before SELL (so same-day trades work correctly)
-    const sortedTxns = [...txns].sort((a, b) => {
-      const dateCompare = new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime();
-      if (dateCompare !== 0) return dateCompare;
-      // On same day, BUY should come before SELL
-      if (a.transaction_type === 'BUY' && b.transaction_type === 'SELL') return -1;
-      if (a.transaction_type === 'SELL' && b.transaction_type === 'BUY') return 1;
-      return 0;
-    });
+    const sortedTxns = sortByTradeOrder(txns);
 
     for (const tx of sortedTxns) {
       // 日期可能帶時間（DB 為 date 欄位，但匯入來源不一），只比對 YYYY-MM-DD
@@ -166,14 +177,7 @@ export function computeRealizedGains(
 
   for (const [ticker, txns] of byTicker) {
     const buyQueue: { quantity: number; price: number; commission: number }[] = [];
-    // Sort by date ascending, then BUY before SELL (so same-day trades work correctly)
-    const sortedTxns = [...txns].sort((a, b) => {
-      const dateCompare = new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime();
-      if (dateCompare !== 0) return dateCompare;
-      if (a.transaction_type === 'BUY' && b.transaction_type === 'SELL') return -1;
-      if (a.transaction_type === 'SELL' && b.transaction_type === 'BUY') return 1;
-      return 0;
-    });
+    const sortedTxns = sortByTradeOrder(txns);
 
     for (const tx of sortedTxns) {
       if (tx.transaction_type === 'BUY') {
@@ -220,6 +224,112 @@ export function computeRealizedGains(
 
   // Sort by date descending
   return gains.sort((a, b) => new Date(b.sellDate).getTime() - new Date(a.sellDate).getTime());
+}
+
+/**
+ * 每一筆交易的收益狀況（交易記錄畫面用），以 FIFO 把賣出配對到買入。
+ *
+ * - 賣出：賣出淨收入（扣手續費與交易稅）− 配對到的買入成本 = 已實現損益。
+ * - 買入：被後續賣出配對掉的股數算已實現，剩下還持有的股數以現價算未實現，兩段相加。
+ *   報酬率的分母都用該筆交易自己的成本（賣出用配對到的買入成本）。
+ */
+export function computeTransactionPnL(
+  transactions: Transaction[],
+  prices: Map<string, StockPrice>
+): Map<string, TransactionPnL> {
+  const result = new Map<string, TransactionPnL>();
+  const byTicker = groupByTicker(transactions);
+
+  for (const [ticker, txns] of byTicker) {
+    const currentPrice = prices.get(ticker)?.price ?? 0;
+    // 還沒被賣掉的買入批次，舊的在前
+    const buyQueue: { id: string; quantity: number; price: number; feePerShare: number }[] = [];
+
+    for (const tx of sortByTradeOrder(txns)) {
+      if (tx.quantity <= 0) continue;
+
+      if (tx.transaction_type === 'BUY') {
+        const feePerShare = (tx.commission || 0) / tx.quantity;
+
+        result.set(tx.id, {
+          gain: null,
+          gainPercent: null,
+          realized: 0,
+          unrealized: null,
+          soldShares: 0,
+          heldShares: tx.quantity,
+          basis: tx.quantity * tx.price + (tx.commission || 0),
+        });
+
+        buyQueue.push({ id: tx.id, quantity: tx.quantity, price: tx.price, feePerShare });
+        continue;
+      }
+
+      // 賣出：淨收入扣掉手續費與交易稅，再減掉 FIFO 配對到的買入成本
+      const sellFeePerShare = ((tx.commission || 0) + (tx.tax || 0)) / tx.quantity;
+      let remaining = tx.quantity;
+      let matchedShares = 0;
+      let matchedCost = 0;
+      let realized = 0;
+
+      while (remaining > 0 && buyQueue.length > 0) {
+        const lot = buyQueue[0];
+        const taken = Math.min(remaining, lot.quantity);
+        const buyCost = taken * (lot.price + lot.feePerShare);
+        const revenue = taken * (tx.price - sellFeePerShare);
+        const gain = revenue - buyCost;
+
+        realized += gain;
+        matchedShares += taken;
+        matchedCost += buyCost;
+        remaining -= taken;
+        lot.quantity -= taken;
+
+        // 這段獲利同時掛在被賣掉的那筆買入上
+        const buyPnL = result.get(lot.id);
+        if (buyPnL) {
+          buyPnL.realized += gain;
+          buyPnL.soldShares += taken;
+          buyPnL.heldShares -= taken;
+        }
+
+        if (lot.quantity <= 0) buyQueue.shift();
+      }
+
+      result.set(tx.id, {
+        // 沒有任何對應的買入紀錄（例如只匯入部分歷史）就不硬算
+        gain: matchedShares > 0 ? realized : null,
+        gainPercent: matchedCost > 0 ? (realized / matchedCost) * 100 : null,
+        realized,
+        unrealized: 0,
+        soldShares: matchedShares,
+        heldShares: 0,
+        basis: matchedCost,
+      });
+    }
+
+    // 買入的未實現部分：還留著的股數用現價評價
+    for (const lot of buyQueue) {
+      const pnl = result.get(lot.id);
+      if (!pnl || currentPrice <= 0) continue;
+      pnl.unrealized = lot.quantity * (currentPrice - lot.price - lot.feePerShare);
+    }
+
+    for (const tx of txns) {
+      const pnl = result.get(tx.id);
+      if (!pnl || tx.transaction_type !== 'BUY') continue;
+
+      // 全部賣掉了就沒有未實現的部分
+      if (pnl.heldShares <= 0) pnl.unrealized = 0;
+      // 還有持股但抓不到現價時不猜，整筆顯示為無法計算
+      else if (pnl.unrealized == null) continue;
+
+      pnl.gain = pnl.realized + (pnl.unrealized ?? 0);
+      pnl.gainPercent = pnl.basis > 0 ? (pnl.gain / pnl.basis) * 100 : null;
+    }
+  }
+
+  return result;
 }
 
 // Calculate portfolio summary

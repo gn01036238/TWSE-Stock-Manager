@@ -8,6 +8,30 @@ export const PATTERN_LABEL: Record<PriceVolumePattern, string> = {
   unknown: '--',
 };
 
+/**
+ * 把價量型態拆成「價」「量」兩個方向，畫面只顯示這兩個字、用漲跌色表達方向。
+ * null 代表沒資料（unknown）。
+ */
+export function patternDirection(pattern: PriceVolumePattern): {
+  /** true = 價漲 */
+  priceUp: boolean | null;
+  /** true = 量增 */
+  volumeUp: boolean | null;
+} {
+  switch (pattern) {
+    case 'up-expand':
+      return { priceUp: true, volumeUp: true };
+    case 'up-shrink':
+      return { priceUp: true, volumeUp: false };
+    case 'down-expand':
+      return { priceUp: false, volumeUp: true };
+    case 'down-shrink':
+      return { priceUp: false, volumeUp: false };
+    default:
+      return { priceUp: null, volumeUp: null };
+  }
+}
+
 /** 成交量（張） */
 export function formatLots(value: number | null | undefined): string {
   if (value == null) return '--';

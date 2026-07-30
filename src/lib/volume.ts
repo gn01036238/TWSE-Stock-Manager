@@ -1,5 +1,5 @@
 import type { PriceVolumePattern } from '@/types';
-import { getYahooClient, toYahooSymbols } from './yahoo';
+import { fetchDailyBars } from './daily-bars';
 import { taipeiDateKey } from './market';
 
 /** 大盤每日成交資訊（單位：元、股） */
@@ -7,7 +7,6 @@ const FMTQIK_URL = 'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK';
 /** 盤中即時指數 */
 const MIS_URL = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
 
-const LOOKBACK_DAYS = 45;
 /** 已收盤交易日的成交量不會再變，可以放心快取 */
 const CACHE_TTL = 30 * 60 * 1000;
 /** 量比的均量天數，含當日 */
@@ -38,30 +37,14 @@ async function fetchTickerStats(ticker: string): Promise<VolumeStats> {
   if (cached && Date.now() - cached.at < CACHE_TTL) return cached.value;
 
   const today = taipeiDateKey();
-  let stats = EMPTY_STATS;
+  const bars = await fetchDailyBars(ticker);
 
-  for (const symbol of toYahooSymbols(ticker)) {
-    try {
-      const result = await getYahooClient().chart(symbol, {
-        period1: new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000),
-        interval: '1d',
-      });
+  const lots = bars
+    // 當日還在跳動，均量只取已收盤的交易日
+    .filter((bar) => bar.date !== today && bar.volume != null && bar.volume > 0)
+    .map((bar) => bar.volume!);
 
-      const bars = (result.quotes ?? []) as { date?: Date; volume?: number | null }[];
-      const lots = bars
-        .filter((bar) => bar?.date != null && bar.volume != null && bar.volume > 0)
-        // 當日還在跳動，均量只取已收盤的交易日
-        .filter((bar) => taipeiDateKey(new Date(bar.date!)) !== today)
-        .map((bar) => bar.volume! / 1000);
-
-      if (lots.length === 0) continue;
-
-      stats = statsFromLots(lots);
-      break;
-    } catch (error) {
-      console.error(`Failed to fetch daily volume for ${symbol}:`, error);
-    }
-  }
+  const stats = lots.length > 0 ? statsFromLots(lots) : EMPTY_STATS;
 
   statsCache.set(ticker, { at: Date.now(), value: stats });
   return stats;

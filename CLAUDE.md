@@ -17,9 +17,9 @@ TWSE Stock Manager is a web-based portfolio management application for tracking 
 ```
 src/
 ├── app/                    # Next.js App Router pages
-│   ├── api/               # API routes (transactions, prices, import, dividends, chips)
+│   ├── api/               # API routes (transactions, prices, import, dividends, chips, candles)
 │   ├── page.tsx           # 總覽：摘要 + 持股/籌碼合併表格（原 holdings、chips 頁已併入）
-│   ├── transactions/      # Transaction list and new transaction form
+│   ├── transactions/      # 交易列表（含股票全名、每筆損益、distinct 篩選下拉）與新增表單
 │   ├── dividends/         # Dividend tracking
 │   ├── analytics/         # Performance analytics
 │   └── import/            # CSV import
@@ -59,6 +59,8 @@ npm run lint     # Run ESLint
 - **Cost basis**: FIFO for realized gains, average cost for holdings
 - **今日損益**: 昨日持股以昨收為基準、當日買進的部位以成交價為基準（FIFO 決定賣掉的是哪批），
   未計手續費；交易日以走勢圖回傳的 tradingDate 為準，取不到時用 `latestTradingDateKey()`
+- **每筆交易損益** (`computeTransactionPnL`)：賣出＝FIFO 配對買入成本後的已實現損益（已扣手續費、
+  交易稅）；買入＝已被賣掉部分的已實現 ＋ 還持有部分以現價計的未實現。抓不到現價或沒有對應買入紀錄時回 null
 - **Commission**: min 20 TWD, broker-specific discount rates
 - **Tax**: 0.3% stocks, 0.1% ETFs (tickers starting with "00")
 - **Currency**: TWD, no decimals
@@ -74,6 +76,9 @@ npm run lint     # Run ESLint
 - `GET /api/prices?tickers=` - Stock prices from TWSE
 - `PUT /api/import` - Preview CSV, `POST /api/import` - Import CSV
 - `GET /api/dividends` - Dividend income data
+- `GET /api/chips?tickers=` - 成交量、量比、價量型態、三大法人與主力買賣超（含加權指數列）
+- `GET /api/candles?tickers=&limit=` - 日 K（OHLC）序列；`0000` 代表加權指數（Yahoo `^TWII`）。
+  與量比共用 `lib/daily-bars.ts` 的抓取與快取，同一檔不會重複問 Yahoo
 
 ## Database
 

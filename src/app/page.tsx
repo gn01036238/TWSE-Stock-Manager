@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useHoldings } from '@/hooks/useHoldings';
 import { useChips } from '@/hooks/useChips';
+import { useCandles } from '@/hooks/useCandles';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -12,13 +13,24 @@ import { formatCurrency, formatPercent } from '@/lib/calculations';
 import { LivePrice } from '@/components/live-price';
 import { LivePriceStatus } from '@/components/live-price-status';
 import { Sparkline } from '@/components/sparkline';
+import { Candlestick } from '@/components/candlestick';
 import { DayChange } from '@/components/day-change';
 import { DataDateTag } from '@/components/data-date-tag';
 import { DividendHistory, type DividendRecord } from '@/components/dividend-history';
 import { MarketIndices } from '@/components/market-indices';
 import { DOWN_TEXT, UP_TEXT, gainBadgeClass, gainTextClass } from '@/lib/colors';
-import { PATTERN_LABEL, formatFlow, formatLots } from '@/lib/chips-format';
-import type { ChipRow, Holding, IntradaySeries, StockPrice } from '@/types';
+import { PATTERN_LABEL, formatFlow, formatLots, patternDirection } from '@/lib/chips-format';
+import type {
+  ChipRow,
+  DailyBar,
+  Holding,
+  IntradaySeries,
+  PriceVolumePattern,
+  StockPrice,
+} from '@/types';
+
+/** 加權指數列借用的代號，跟 /api/chips 一致 */
+const TAIEX_TICKER = '0000';
 
 /** 表格的一列：持股 + 當日籌碼；加權指數彙總列沒有 holding */
 interface OverviewRow {
@@ -28,6 +40,7 @@ interface OverviewRow {
   chip: ChipRow | null;
   price?: StockPrice;
   intraday?: IntradaySeries;
+  candles: DailyBar[];
   dividends: DividendRecord[];
 }
 
@@ -84,6 +97,22 @@ function dayChangeHint(holding: Holding): string {
   )}`;
 }
 
+/** 價量型態只顯示「價」「量」兩個字：紅＝價漲／量增，綠＝價跌／量縮 */
+function PatternMark({ pattern }: { pattern: PriceVolumePattern }) {
+  const { priceUp, volumeUp } = patternDirection(pattern);
+
+  if (priceUp == null || volumeUp == null) {
+    return <span className="text-muted-foreground">--</span>;
+  }
+
+  return (
+    <span className="font-medium tracking-wide" title={PATTERN_LABEL[pattern]}>
+      <span className={priceUp ? UP_TEXT : DOWN_TEXT}>價</span>
+      <span className={volumeUp ? UP_TEXT : DOWN_TEXT}>量</span>
+    </span>
+  );
+}
+
 function FlowText({ value, unit }: { value: number | undefined; unit: ChipRow['flowUnit'] }) {
   const className =
     value == null || Math.round(value) === 0 ? 'text-muted-foreground' : gainTextClass(value);
@@ -130,6 +159,13 @@ export default function Dashboard() {
   const chipRows = chips?.rows;
   const chipMarket = chips?.market;
 
+  // 日 K 連加權指數一起抓，表尾那列才有 K 棒
+  const candleTickers = useMemo(
+    () => (heldTickers.length > 0 ? [...heldTickers, TAIEX_TICKER] : []),
+    [heldTickers]
+  );
+  const { data: candles } = useCandles(candleTickers);
+
   const rows: OverviewRow[] = useMemo(() => {
     const chipByTicker = new Map((chipRows ?? []).map((row) => [row.ticker, row]));
 
@@ -140,9 +176,10 @@ export default function Dashboard() {
       chip: chipByTicker.get(holding.ticker) ?? null,
       price: prices?.[holding.ticker],
       intraday: intraday[holding.ticker],
+      candles: candles?.[holding.ticker]?.bars ?? [],
       dividends: (dividends[holding.ticker]?.dividends as DividendRecord[]) ?? [],
     }));
-  }, [holdings, chipRows, prices, intraday, dividends]);
+  }, [holdings, chipRows, prices, intraday, candles, dividends]);
 
   const marketRow: OverviewRow | null = useMemo(() => {
     if (!chipMarket) return null;
@@ -151,9 +188,10 @@ export default function Dashboard() {
       name: chipMarket.name,
       holding: null,
       chip: chipMarket,
+      candles: candles?.[chipMarket.ticker]?.bars ?? [],
       dividends: [],
     };
-  }, [chipMarket]);
+  }, [chipMarket, candles]);
 
   const columns = useMemo<ColumnDef<OverviewRow>[]>(
     () => [
@@ -197,6 +235,13 @@ export default function Dashboard() {
             height={28}
           />
         ),
+      },
+      {
+        id: 'candles',
+        header: '日K',
+        headerText: '日K（近 20 個交易日，紅＝收盤高於開盤；滑過看最新一根開高低收）',
+        width: 120,
+        cell: (row) => <Candlestick bars={row.candles} width={110} height={30} />,
       },
       {
         id: 'changePercent',
@@ -346,11 +391,13 @@ export default function Dashboard() {
       },
       {
         id: 'pattern',
-        header: '價量型態',
-        headerText: '價量型態（量增／量縮與前一交易日比較）',
-        width: 90,
+        header: '價量',
+        headerText:
+          '價量型態：價紅＝漲、綠＝跌；量紅＝量增、綠＝量縮（量與前一交易日比較）',
+        width: 60,
         align: 'right',
-        cell: (row) => (row.chip ? PATTERN_LABEL[row.chip.pattern] : '--'),
+        cell: (row) =>
+          row.chip ? <PatternMark pattern={row.chip.pattern} /> : <span>--</span>,
       },
       {
         id: 'major',
@@ -534,6 +581,7 @@ export default function Dashboard() {
       <p className="text-xs text-muted-foreground">
         持股 {rows.length} 檔，點任一列可展開配息紀錄。表頭可拖曳調整順序、拖右緣調欄寬，設定會記在這個瀏覽器裡。
         今日損益的基準為昨收，當天才買進的部位改以成交價計算，未計手續費。
+        日K 為近 20 個交易日，最後一根是當日（盤中還會變動）；價量欄的「價」紅漲綠跌、「量」紅為量增綠為量縮。
         成交量與量比為當日即時；三大法人約 16:00、主力分點更晚才會出當日資料，標題旁的標籤會標明目前看的是哪一天。
         加權指數列的成交量單位為張，法人買賣超為全市場金額（億元），沒有分點資料所以主力欄為空。
       </p>
