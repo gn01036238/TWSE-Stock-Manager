@@ -1,6 +1,10 @@
 import type { PriceVolumePattern } from '@/types';
 import { fetchDailyBars } from './daily-bars';
-import { taipeiDateKey } from './market';
+import { getMarketStatus, taipeiDateKey } from './market';
+import { recordLivePrice } from './intraday-store';
+
+/** 加權指數在走勢樣本裡的 key，跟參考指數用同一個代號 */
+export const TAIEX_SYMBOL = '^TWII';
 
 /** 大盤每日成交資訊（單位：元、股） */
 const FMTQIK_URL = 'https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK';
@@ -194,11 +198,16 @@ export async function fetchTaiexSnapshot(): Promise<TaiexSnapshot | null> {
 
     if (!Number.isFinite(price) || price <= 0) return null;
 
+    const date = day ? `${day[1]}-${day[2]}-${day[3]}` : null;
+
+    // 盤中順手留樣本，參考指數的走勢線才不用等 Yahoo 的 ^TWII
+    if (date && getMarketStatus() === 'open') recordLivePrice(TAIEX_SYMBOL, date, price);
+
     return {
       price,
       previousClose: Number.isFinite(previousClose) && previousClose > 0 ? previousClose : price,
       volume: Number.isFinite(volume) && volume > 0 ? volume : null,
-      date: day ? `${day[1]}-${day[2]}-${day[3]}` : null,
+      date,
     };
   } catch (error) {
     console.error('Failed to fetch TAIEX snapshot:', error);

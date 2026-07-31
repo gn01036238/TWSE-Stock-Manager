@@ -63,16 +63,27 @@ export interface StockPrice {
   high: number;
   low: number;
   volume: number;
+  /** 報價所屬交易日（TWSE 給的），台北時區 YYYY-MM-DD；只有 Yahoo 備援時為 null */
+  tradingDate: string | null;
   updatedAt: Date;
 }
+
+/** 走勢圖的資料來源：Yahoo 的 5 分鐘 K，或自己累積的 TWSE 即時樣本 */
+export type IntradaySource = 'yahoo' | 'live';
 
 /** 單一交易日的日內走勢（5 分鐘線收盤價序列） */
 export interface IntradaySeries {
   ticker: string;
   points: number[];
+  /** 每個點距離當日開盤的分鐘數，與 points 等長 */
+  offsets: number[];
+  /** 交易時段長度（分鐘），走勢圖的 X 軸固定畫成 0 ~ 這個值 */
+  sessionMinutes: number;
   previousClose: number;
   /** 資料所屬交易日，台北時區 YYYY-MM-DD */
   tradingDate: string;
+  /** 這條線是哪裡來的；'live' 代表 Yahoo 還沒給今天的 K，改用即時樣本 */
+  source: IntradaySource;
 }
 
 /** 單一交易日的日線（K 棒）；最後一根在盤中還會變動 */
@@ -102,6 +113,15 @@ export interface IndexQuote {
   change: number;
   changePercent: number;
   points: number[];
+  /**
+   * 每個點距離當日開盤的分鐘數；只有台股（^TWII）算得出來，
+   * 其他市場的交易時段不一樣，留空讓走勢圖平均分佈
+   */
+  offsets: number[];
+  /** 交易時段長度（分鐘）；0 代表沒有固定 X 軸 */
+  sessionMinutes: number;
+  /** 走勢線所屬交易日，台北時區 YYYY-MM-DD */
+  tradingDate: string;
 }
 
 /** 單一交易日的三大法人買賣超（外資不含外資自營商，避免與自營商重複） */

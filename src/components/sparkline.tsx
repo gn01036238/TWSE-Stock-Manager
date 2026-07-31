@@ -5,12 +5,18 @@ import { DOWN_HEX, UP_HEX } from '@/lib/colors';
 
 export function Sparkline({
   points,
+  offsets,
+  sessionMinutes = 0,
   baseline,
   width = 104,
   height = 40,
   className = '',
 }: {
   points: number[];
+  /** 每個點距離開盤的分鐘數；有給就用時間當 X 軸，沒給就平均分佈 */
+  offsets?: number[];
+  /** 交易時段長度（分鐘）；X 軸固定畫成 0 ~ 這個值，線只填到目前為止 */
+  sessionMinutes?: number;
   /** 昨收價，畫成虛線基準線 */
   baseline?: number;
   width?: number;
@@ -38,14 +44,20 @@ export function Sparkline({
   const padding = 3;
   const usableHeight = height - padding * 2;
 
-  const toX = (index: number) => (index / (points.length - 1)) * width;
+  // X 軸固定成「開盤～收盤」，盤中就只填到現在為止，不把幾個點拉滿整個寬度
+  const byTime = sessionMinutes > 0 && offsets?.length === points.length;
+
+  const toX = (index: number) =>
+    byTime
+      ? (Math.min(Math.max(offsets![index], 0), sessionMinutes) / sessionMinutes) * width
+      : (index / (points.length - 1)) * width;
   const toY = (value: number) => padding + (1 - (value - min) / range) * usableHeight;
 
   const line = points
     .map((value, index) => `${index === 0 ? 'M' : 'L'}${toX(index).toFixed(2)},${toY(value).toFixed(2)}`)
     .join(' ');
 
-  const area = `${line} L${width},${height} L0,${height} Z`;
+  const area = `${line} L${toX(points.length - 1).toFixed(2)},${height} L${toX(0).toFixed(2)},${height} Z`;
 
   const last = points[points.length - 1];
   const isUp = last >= base;

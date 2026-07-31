@@ -32,15 +32,15 @@ export function useHoldings() {
   // 日內走勢圖資料。刻意不列入 isLoading，避免走勢圖拖慢整頁顯示
   const { data: intraday } = useIntraday(tickers);
 
-  // 今日損益要知道哪些交易是「今天買的」。走勢圖回傳的交易日最準（含國定假日），
-  // 沒拿到時退回用台北時間推算
+  // 今日損益要知道哪些交易是「今天買的」。TWSE 報價帶的交易日最準（避得開國定假日，
+  // 也不會像 Yahoo 那樣整場落後一天），沒拿到時才退回用台北時間推算
   const tradingDate = useMemo(() => {
-    const dates = Object.values(intraday ?? {})
-      .map((series) => series?.tradingDate)
+    const dates = Object.values(prices ?? {})
+      .map((price) => price?.tradingDate)
       .filter((date): date is string => !!date)
       .sort();
     return dates.at(-1) ?? latestTradingDateKey();
-  }, [intraday]);
+  }, [prices]);
 
   // Compute holdings, realized gains, and portfolio summary
   const { holdings, realizedGains, summary } = useMemo(() => {

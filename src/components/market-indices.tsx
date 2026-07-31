@@ -53,6 +53,8 @@ export function MarketIndices({ className = '' }: { className?: string }) {
                   </span>
                   <Sparkline
                     points={quote.points ?? []}
+                    offsets={quote.offsets}
+                    sessionMinutes={quote.sessionMinutes}
                     baseline={quote.previousClose}
                     width={52}
                     height={18}

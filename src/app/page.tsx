@@ -225,11 +225,13 @@ export default function Dashboard() {
       {
         id: 'trend',
         header: '今日走勢',
-        headerText: '今日走勢（5 分鐘線）',
+        headerText: '今日走勢（X 軸固定為 09:00–13:30，一分鐘取樣）',
         width: 100,
         cell: (row) => (
           <Sparkline
             points={row.intraday?.points ?? []}
+            offsets={row.intraday?.offsets}
+            sessionMinutes={row.intraday?.sessionMinutes}
             baseline={row.intraday?.previousClose}
             width={80}
             height={28}

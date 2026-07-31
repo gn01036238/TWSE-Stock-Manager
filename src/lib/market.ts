@@ -2,7 +2,8 @@ export type MarketStatus = 'pre' | 'open' | 'closed' | 'weekend';
 
 const MARKET_OPEN_MINUTES = 9 * 60; // 09:00
 const MARKET_CLOSE_MINUTES = 13 * 60 + 30; // 13:30
-const SESSION_MINUTES = MARKET_CLOSE_MINUTES - MARKET_OPEN_MINUTES; // 270
+/** 一個交易時段的長度（分鐘），走勢圖的 X 軸就是 0 ~ 這個值 */
+export const SESSION_MINUTES = MARKET_CLOSE_MINUTES - MARKET_OPEN_MINUTES; // 270
 
 function taipeiClock(now: Date): { weekday: string; minutes: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -82,6 +83,14 @@ export function latestTradingDateKey(now: Date = new Date()): string {
   }
 
   return taipeiDateKey(cursor);
+}
+
+/**
+ * 某個交易日 09:00 的分鐘桶編號（epoch 分鐘）。走勢圖要把 K 棒換算成
+ * 「距離開盤幾分鐘」才畫得出固定的 09:00–13:30 X 軸。
+ */
+export function sessionOpenBucket(tradingDate: string): number {
+  return Math.floor(new Date(`${tradingDate}T09:00:00+08:00`).getTime() / 60000);
 }
 
 export const MARKET_STATUS_LABEL: Record<MarketStatus, string> = {
