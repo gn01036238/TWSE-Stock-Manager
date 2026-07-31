@@ -1,15 +1,21 @@
 'use client';
 
-import { useMemo } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { useHoldings } from '@/hooks/useHoldings';
 import { useChips } from '@/hooks/useChips';
 import { useCandles } from '@/hooks/useCandles';
+import { useIntraday } from '@/hooks/useIntraday';
+import { useIndices } from '@/hooks/useIndices';
+import { useWatchlist } from '@/hooks/useWatchlist';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { DataTable, type ColumnDef } from '@/components/data-table';
 import { formatCurrency, formatPercent } from '@/lib/calculations';
+import { isTwWatchlistSymbol, twTickerFromSymbol } from '@/lib/watchlist';
 import { LivePrice } from '@/components/live-price';
 import { LivePriceStatus } from '@/components/live-price-status';
 import { Sparkline } from '@/components/sparkline';
@@ -24,6 +30,7 @@ import type {
   ChipRow,
   DailyBar,
   Holding,
+  IndexQuote,
   IntradaySeries,
   PriceVolumePattern,
   StockPrice,
@@ -32,7 +39,7 @@ import type {
 /** 加權指數列借用的代號，跟 /api/chips 一致 */
 const TAIEX_TICKER = '0000';
 
-/** 表格的一列：持股 + 當日籌碼；加權指數彙總列沒有 holding */
+/** 表格的一列：持股 + 當日籌碼；加權指數彙總列與觀察清單列沒有 holding */
 interface OverviewRow {
   ticker: string;
   name: string;
@@ -42,6 +49,10 @@ interface OverviewRow {
   intraday?: IntradaySeries;
   candles: DailyBar[];
   dividends: DividendRecord[];
+  /** 只有台股以外的觀察標的（美股等）才有，走 Yahoo 報價 */
+  quote?: IndexQuote | null;
+  /** 有值代表這列是觀察清單（而非持股），值即為原始 Yahoo 代號，用來移除 */
+  watchlistSymbol?: string;
 }
 
 function SummaryStat({
@@ -153,23 +164,67 @@ export default function Dashboard() {
   // 股票欄位要不要顯示代號，記在瀏覽器
   const [showTicker, setShowTicker] = usePersistentState('twse:overview:show-ticker', true);
 
+  // 只想觀察、沒有持有的標的；代號格式跟參考指標一致（台股 2330.TW，美股等直接 AAPL）
+  const { symbols: watchlistSymbols, addSymbol: addWatchlistSymbol, removeSymbol: removeWatchlistSymbol, loaded: watchlistLoaded } = useWatchlist();
+  const [watchlistDraft, setWatchlistDraft] = useState('');
+
   // 籌碼只看現在還持有的標的，出清的不顯示
   const heldTickers = useMemo(() => holdings.map((holding) => holding.ticker), [holdings]);
-  const { data: chips } = useChips(heldTickers);
+
+  // 觀察清單拆成台股（沿用 TWSE 籌碼／日K）跟其他市場（走 Yahoo 報價）；已經持有的台股不重複列一次
+  const watchlistEntries = useMemo(() => {
+    const heldSet = new Set(heldTickers);
+    const seenTw = new Set<string>();
+
+    return watchlistSymbols
+      .map((symbol) =>
+        isTwWatchlistSymbol(symbol)
+          ? { symbol, ticker: twTickerFromSymbol(symbol), isTw: true as const }
+          : { symbol, ticker: symbol, isTw: false as const }
+      )
+      .filter((entry) => {
+        if (!entry.isTw) return true;
+        if (heldSet.has(entry.ticker) || seenTw.has(entry.ticker)) return false;
+        seenTw.add(entry.ticker);
+        return true;
+      });
+  }, [watchlistSymbols, heldTickers]);
+
+  const watchlistTwTickers = useMemo(
+    () => watchlistEntries.filter((entry) => entry.isTw).map((entry) => entry.ticker),
+    [watchlistEntries]
+  );
+  const watchlistOtherSymbols = useMemo(
+    () => watchlistEntries.filter((entry) => !entry.isTw).map((entry) => entry.symbol),
+    [watchlistEntries]
+  );
+
+  // 觀察清單的台股要跟持股一樣完整（籌碼、日K、走勢），所以併進同一批請求
+  const chipTickers = useMemo(
+    () => [...heldTickers, ...watchlistTwTickers],
+    [heldTickers, watchlistTwTickers]
+  );
+  const { data: chips } = useChips(chipTickers);
   const chipRows = chips?.rows;
   const chipMarket = chips?.market;
 
   // 日 K 連加權指數一起抓，表尾那列才有 K 棒
   const candleTickers = useMemo(
-    () => (heldTickers.length > 0 ? [...heldTickers, TAIEX_TICKER] : []),
-    [heldTickers]
+    () => (chipTickers.length > 0 ? [...chipTickers, TAIEX_TICKER] : []),
+    [chipTickers]
   );
   const { data: candles } = useCandles(candleTickers);
 
-  const rows: OverviewRow[] = useMemo(() => {
-    const chipByTicker = new Map((chipRows ?? []).map((row) => [row.ticker, row]));
+  const { data: watchlistIntraday } = useIntraday(watchlistLoaded ? watchlistTwTickers : []);
+  const { data: watchlistQuotes } = useIndices(watchlistLoaded ? watchlistOtherSymbols : []);
 
-    return holdings.map((holding) => ({
+  const chipByTicker = useMemo(
+    () => new Map((chipRows ?? []).map((row) => [row.ticker, row])),
+    [chipRows]
+  );
+
+  const rows: OverviewRow[] = useMemo(() => {
+    const holdingRows = holdings.map((holding) => ({
       ticker: holding.ticker,
       name: holding.name,
       holding,
@@ -179,7 +234,37 @@ export default function Dashboard() {
       candles: candles?.[holding.ticker]?.bars ?? [],
       dividends: (dividends[holding.ticker]?.dividends as DividendRecord[]) ?? [],
     }));
-  }, [holdings, chipRows, prices, intraday, candles, dividends]);
+
+    const watchlistRows: OverviewRow[] = watchlistEntries.map((entry) => {
+      if (entry.isTw) {
+        const chip = chipByTicker.get(entry.ticker) ?? null;
+        return {
+          ticker: entry.ticker,
+          name: chip?.name ?? entry.ticker,
+          holding: null,
+          chip,
+          intraday: watchlistIntraday?.[entry.ticker],
+          candles: candles?.[entry.ticker]?.bars ?? [],
+          dividends: [],
+          watchlistSymbol: entry.symbol,
+        };
+      }
+
+      const quote = watchlistQuotes?.[entry.symbol] ?? null;
+      return {
+        ticker: entry.symbol,
+        name: quote?.name ?? entry.symbol,
+        holding: null,
+        chip: null,
+        quote,
+        candles: [],
+        dividends: [],
+        watchlistSymbol: entry.symbol,
+      };
+    });
+
+    return [...holdingRows, ...watchlistRows];
+  }, [holdings, chipByTicker, prices, intraday, candles, dividends, watchlistEntries, watchlistIntraday, watchlistQuotes]);
 
   const marketRow: OverviewRow | null = useMemo(() => {
     if (!chipMarket) return null;
@@ -219,20 +304,31 @@ export default function Dashboard() {
                 {row.name}
               </span>
             </span>
+            {row.watchlistSymbol && (
+              <button
+                type="button"
+                onClick={() => removeWatchlistSymbol(row.watchlistSymbol!)}
+                className="ml-auto shrink-0 text-muted-foreground hover:text-destructive"
+                aria-label={`從觀察清單移除 ${row.watchlistSymbol}`}
+                title="從觀察清單移除"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
         ),
       },
       {
         id: 'trend',
         header: '今日走勢',
-        headerText: '今日走勢（X 軸固定為 09:00–13:30，一分鐘取樣）',
+        headerText: '今日走勢（X 軸固定為 09:00–13:30，一分鐘取樣；非台股交易時段不同，改平均分佈）',
         width: 100,
         cell: (row) => (
           <Sparkline
-            points={row.intraday?.points ?? []}
-            offsets={row.intraday?.offsets}
-            sessionMinutes={row.intraday?.sessionMinutes}
-            baseline={row.intraday?.previousClose}
+            points={row.intraday?.points ?? row.quote?.points ?? []}
+            offsets={row.intraday?.offsets ?? row.quote?.offsets}
+            sessionMinutes={row.intraday?.sessionMinutes ?? row.quote?.sessionMinutes}
+            baseline={row.intraday?.previousClose ?? row.quote?.previousClose}
             width={80}
             height={28}
           />
@@ -256,6 +352,10 @@ export default function Dashboard() {
           ) : row.chip?.changePercent != null ? (
             <span className={gainTextClass(row.chip.changePercent)}>
               {withSign(row.chip.changePercent, formatPercent(row.chip.changePercent))}
+            </span>
+          ) : row.quote?.changePercent != null ? (
+            <span className={gainTextClass(row.quote.changePercent)}>
+              {withSign(row.quote.changePercent, formatPercent(row.quote.changePercent))}
             </span>
           ) : (
             '--'
@@ -307,6 +407,8 @@ export default function Dashboard() {
             <LivePrice value={row.holding.currentPrice} className="px-0" />
           ) : row.chip?.price != null ? (
             row.chip.price.toLocaleString('zh-TW', { maximumFractionDigits: 2 })
+          ) : row.quote?.price != null ? (
+            row.quote.price.toLocaleString('zh-TW', { maximumFractionDigits: 2 })
           ) : (
             '--'
           ),
@@ -440,7 +542,7 @@ export default function Dashboard() {
         ),
       },
     ],
-    [showTicker]
+    [showTicker, removeWatchlistSymbol]
   );
 
   if (isLoading) {
@@ -550,9 +652,37 @@ export default function Dashboard() {
 
       <Card className="gap-2 py-3">
         <CardContent className="px-2">
+          <div className="mb-2 flex items-center gap-2 px-1">
+            <span className="text-xs text-muted-foreground">新增觀察標的</span>
+            <Input
+              value={watchlistDraft}
+              onChange={(event) => setWatchlistDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                addWatchlistSymbol(watchlistDraft);
+                setWatchlistDraft('');
+              }}
+              placeholder="輸入 Yahoo 代號，例如 2330.TW（台股）、AAPL（美股）"
+              className="h-7 max-w-sm text-xs"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={!watchlistDraft.trim()}
+              onClick={() => {
+                addWatchlistSymbol(watchlistDraft);
+                setWatchlistDraft('');
+              }}
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              新增
+            </Button>
+          </div>
+
           {rows.length === 0 ? (
             <p className="py-8 text-center text-muted-foreground">
-              尚無持股資料。請先匯入交易記錄或新增交易。
+              尚無持股資料。請先匯入交易記錄或新增交易，也可以在上方新增觀察標的。
             </p>
           ) : (
             <DataTable
@@ -581,11 +711,13 @@ export default function Dashboard() {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        持股 {rows.length} 檔，點任一列可展開配息紀錄。表頭可拖曳調整順序、拖右緣調欄寬，設定會記在這個瀏覽器裡。
+        持股 {holdings.length} 檔{watchlistEntries.length > 0 ? `，觀察 ${watchlistEntries.length} 檔` : ''}，點任一列可展開配息紀錄。表頭可拖曳調整順序、拖右緣調欄寬，設定會記在這個瀏覽器裡。
         今日損益的基準為昨收，當天才買進的部位改以成交價計算，未計手續費。
         日K 為近 20 個交易日，最後一根是當日（盤中還會變動）；價量欄的「價」紅漲綠跌、「量」紅為量增綠為量縮。
         成交量與量比為當日即時；三大法人約 16:00、主力分點更晚才會出當日資料，標題旁的標籤會標明目前看的是哪一天。
         加權指數列的成交量單位為張，法人買賣超為全市場金額（億元），沒有分點資料所以主力欄為空。
+        觀察清單的標的沒有持股相關欄位（持股、均價、市值等）；台股觀察標的資料跟持股一樣完整，其餘市場只有現價、漲跌幅與走勢。
+        股票欄最右邊的 ✕ 可移除觀察標的，只存在這個瀏覽器裡。
       </p>
     </div>
   );
