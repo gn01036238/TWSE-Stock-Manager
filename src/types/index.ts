@@ -124,6 +124,26 @@ export interface IndexQuote {
   tradingDate: string;
 }
 
+/** 全市場資券餘額其中一項（融資或融券） */
+export interface MarginBalanceItem {
+  /** 今日餘額；融資單位億元，融券單位張 */
+  value: number;
+  /** 今日餘額 − 前日餘額 */
+  change: number;
+  /** change ÷ 前日餘額 × 100 */
+  changePercent: number;
+}
+
+/** 全市場融資融券餘額（信用交易統計） */
+export interface MarginBalance {
+  /** 資料所屬交易日，台北時區 YYYY-MM-DD */
+  date: string | null;
+  /** 融資餘額，單位億元 */
+  margin: MarginBalanceItem;
+  /** 融券餘額，單位張 */
+  short: MarginBalanceItem;
+}
+
 /** 單一交易日的三大法人買賣超（外資不含外資自營商，避免與自營商重複） */
 export interface InstitutionalFlow {
   foreign: number;

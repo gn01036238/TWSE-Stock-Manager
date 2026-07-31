@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sparkline } from '@/components/sparkline';
 import { useIndexSymbols, useIndices } from '@/hooks/useIndices';
+import { useMargin } from '@/hooks/useMargin';
 import { gainTextClass } from '@/lib/colors';
 
 function formatIndexValue(value: number): string {
@@ -15,10 +16,33 @@ function formatIndexValue(value: number): string {
   });
 }
 
+/** 資券餘額借用指數條的格式：名稱 + 今日餘額 + 增減率，不畫走勢圖 */
+function MarginChip({
+  label,
+  value,
+  changePercent,
+}: {
+  label: string;
+  value: string;
+  changePercent: number;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm font-semibold tabular-nums">{value}</span>
+      <span className={`text-xs tabular-nums ${gainTextClass(changePercent)}`}>
+        {changePercent >= 0 ? '+' : ''}
+        {changePercent.toFixed(2)}%
+      </span>
+    </div>
+  );
+}
+
 /** 單列指數條，刻意壓低高度，讓總覽首屏能看到持股表格 */
 export function MarketIndices({ className = '' }: { className?: string }) {
   const { symbols, addSymbol, removeSymbol, resetSymbols, loaded } = useIndexSymbols();
   const { data, isLoading } = useIndices(loaded ? symbols : []);
+  const { data: margin } = useMargin();
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
 
@@ -30,7 +54,7 @@ export function MarketIndices({ className = '' }: { className?: string }) {
   return (
     <div className={className}>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
-        <span className="text-xs text-muted-foreground">參考指數</span>
+        <span className="text-xs text-muted-foreground">參考指標</span>
 
         {(loaded ? symbols : []).map((symbol) => {
           const quote = data?.[symbol];
@@ -78,6 +102,21 @@ export function MarketIndices({ className = '' }: { className?: string }) {
             </div>
           );
         })}
+
+        {margin && (
+          <>
+            <MarginChip
+              label="資餘(億元)"
+              value={formatIndexValue(margin.margin.value)}
+              changePercent={margin.margin.changePercent}
+            />
+            <MarginChip
+              label="券餘(張數)"
+              value={margin.short.value.toLocaleString('zh-TW')}
+              changePercent={margin.short.changePercent}
+            />
+          </>
+        )}
 
         <div className="ml-auto flex items-center gap-1">
           {editing && (
