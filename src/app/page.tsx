@@ -24,6 +24,7 @@ import { DayChange } from '@/components/day-change';
 import { DataDateTag } from '@/components/data-date-tag';
 import { DividendHistory, type DividendRecord } from '@/components/dividend-history';
 import { MarketIndices } from '@/components/market-indices';
+import { PortfolioHistoryChart } from '@/components/portfolio-history-chart';
 import { DOWN_TEXT, UP_TEXT, gainBadgeClass, gainTextClass } from '@/lib/colors';
 import { PATTERN_LABEL, formatFlow, formatLots, patternDirection } from '@/lib/chips-format';
 import type {
@@ -727,6 +728,8 @@ export default function Dashboard() {
         </CardContent>
         <MarketIndices className="border-t px-4 py-2" />
       </Card>
+
+      <PortfolioHistoryChart />
 
       <Card className="gap-2 py-3">
         <CardContent className="px-2">

@@ -8,7 +8,7 @@ import type {
 } from '@/types';
 
 // Group transactions by ticker
-function groupByTicker(transactions: Transaction[]): Map<string, Transaction[]> {
+export function groupByTicker(transactions: Transaction[]): Map<string, Transaction[]> {
   const grouped = new Map<string, Transaction[]>();
 
   for (const tx of transactions) {
@@ -22,7 +22,7 @@ function groupByTicker(transactions: Transaction[]): Map<string, Transaction[]> 
 }
 
 /** 日期升冪，同一天買入排在賣出前面（當沖才配對得起來） */
-function sortByTradeOrder(transactions: Transaction[]): Transaction[] {
+export function sortByTradeOrder(transactions: Transaction[]): Transaction[] {
   return [...transactions].sort((a, b) => {
     const dateCompare =
       new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime();
