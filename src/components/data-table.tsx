@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Pin, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { Check, GripVertical, Pin, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -51,9 +51,14 @@ interface DataTableProps<T> {
   renderExpanded?: (row: T) => React.ReactNode | null;
   /** 放進欄位設定面板最上方的額外選項（例如「只顯示名稱」） */
   settingsExtra?: React.ReactNode;
+  /** 列屬於哪一組；有給的話拖曳排序只能在同一組內進行，不能跨組 */
+  rowGroup?: (row: T) => string;
+  /** 有給的話最左邊會出現拖曳把手，可在同組內拖曳調整列順序 */
+  onMoveRow?: (fromKey: string, toKey: string) => void;
 }
 
 const DRAG_THRESHOLD = 4;
+const ROW_HANDLE_WIDTH = 22;
 
 /**
  * 欄寬可拖曳、欄位可拖曳排序、可隱藏、可凍結的表格；設定存在瀏覽器，重開也還在。
@@ -68,6 +73,8 @@ export function DataTable<T>({
   footerRow,
   renderExpanded,
   settingsExtra,
+  rowGroup,
+  onMoveRow,
 }: DataTableProps<T>) {
   const defaults = useMemo(
     () => columns.map(({ id, width, minWidth, frozen, hidden }) => ({ id, width, minWidth, frozen, hidden })),
@@ -94,10 +101,13 @@ export function DataTable<T>({
   const widthOf = (column: ColumnDef<T>) => layout.widths[column.id] ?? column.width;
   const totalWidth = visible.reduce((sum, column) => sum + widthOf(column), 0);
 
+  /** 有拖曳把手時，凍結欄要讓出最左邊那一小欄的寬度 */
+  const handleWidth = onMoveRow ? ROW_HANDLE_WIDTH : 0;
+
   /** 凍結欄位的 left 位移，以及最右邊那個凍結欄（要畫分界線） */
   const { offsets, lastFrozenId } = useMemo(() => {
     const map = new Map<string, number>();
-    let accumulated = 0;
+    let accumulated = handleWidth;
     let last: string | null = null;
 
     for (const column of visible) {
@@ -108,13 +118,19 @@ export function DataTable<T>({
     }
 
     return { offsets: map, lastFrozenId: last };
-  }, [visible, frozenSet, layout.widths]);
+  }, [visible, frozenSet, layout.widths, handleWidth]);
 
   const headerRowRef = useRef<HTMLTableRowElement>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const overIdRef = useRef<string | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  const [dragRowKey, setDragRowKey] = useState<string | null>(null);
+  const [dragRowGroup, setDragRowGroup] = useState<string | null>(null);
+  const [overRowKey, setOverRowKey] = useState<string | null>(null);
+  const overRowKeyRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
 
@@ -160,9 +176,10 @@ export function DataTable<T>({
     const row = headerRowRef.current;
     if (!row) return;
 
-    // 拖曳中欄寬不會變，開始時量一次就夠
+    // 拖曳中欄寬不會變，開始時量一次就夠；有拖曳把手欄的話表頭第一格要跳過
+    const childOffset = onMoveRow ? 1 : 0;
     const rects = visible.map((column, index) => {
-      const rect = (row.children[index] as HTMLElement).getBoundingClientRect();
+      const rect = (row.children[index + childOffset] as HTMLElement).getBoundingClientRect();
       return { id: column.id, left: rect.left, right: rect.right };
     });
 
@@ -188,6 +205,62 @@ export function DataTable<T>({
       }
       setDragId(null);
       setOver(null);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  const setRowOver = (key: string | null) => {
+    overRowKeyRef.current = key;
+    setOverRowKey(key);
+  };
+
+  function startRowReorder(event: React.PointerEvent, row: T) {
+    if (event.button !== 0 || !onMoveRow) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const key = rowKey(row);
+    const group = rowGroup?.(row) ?? null;
+    const body = bodyRef.current;
+    if (!body) return;
+
+    // 只量同一組的列，拖曳時就只會命中可以放的目標，天然限制不能跨組
+    const candidates = rows
+      .filter((r) => !rowGroup || rowGroup(r) === group)
+      .map((r) => rowKey(r))
+      .map((rKey) => {
+        const el = body.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(rKey)}"]`);
+        const rect = el?.getBoundingClientRect();
+        return rect ? { key: rKey, top: rect.top, bottom: rect.bottom } : null;
+      })
+      .filter((c): c is { key: string; top: number; bottom: number } => c != null);
+
+    const state = { startY: event.clientY, active: false };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      if (!state.active) {
+        if (Math.abs(moveEvent.clientY - state.startY) < DRAG_THRESHOLD) return;
+        state.active = true;
+        setDragRowKey(key);
+        setDragRowGroup(group);
+      }
+      const hit = candidates.find(
+        (candidate) => moveEvent.clientY >= candidate.top && moveEvent.clientY <= candidate.bottom
+      );
+      setRowOver(hit && hit.key !== key ? hit.key : null);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (state.active && overRowKeyRef.current) {
+        onMoveRow(key, overRowKeyRef.current);
+      }
+      setDragRowKey(null);
+      setDragRowGroup(null);
+      setRowOver(null);
     };
 
     window.addEventListener('pointermove', onMove);
@@ -307,8 +380,9 @@ export function DataTable<T>({
         </div>
       </div>
 
-      <Table style={{ tableLayout: 'fixed', width: '100%', minWidth: totalWidth }}>
+      <Table style={{ tableLayout: 'fixed', width: '100%', minWidth: totalWidth + handleWidth }}>
         <colgroup>
+          {onMoveRow && <col style={{ width: handleWidth }} />}
           {visible.map((column) => (
             <col key={column.id} style={{ width: widthOf(column) }} />
           ))}
@@ -317,6 +391,13 @@ export function DataTable<T>({
         </colgroup>
         <TableHeader>
           <TableRow ref={headerRowRef} className="hover:bg-transparent">
+            {onMoveRow && (
+              <TableHead
+                aria-hidden
+                style={{ left: 0 }}
+                className="sticky z-10 frozen-cell p-0"
+              />
+            )}
             {visible.map((column) => (
               <TableHead
                 key={column.id}
@@ -341,25 +422,46 @@ export function DataTable<T>({
             <TableHead aria-hidden />
           </TableRow>
         </TableHeader>
-        <TableBody>
+        <TableBody ref={bodyRef}>
           {rows.map((row) => {
             const key = rowKey(row);
             const expandedContent = renderExpanded?.(row) ?? null;
             const isExpanded = expandedContent != null && expandedKeys.has(key);
+            const group = rowGroup?.(row) ?? null;
+            const isDraggedOutOfGroup =
+              dragRowKey != null && dragRowKey !== key && !!rowGroup && group !== dragRowGroup;
 
             return (
               <Fragment key={key}>
                 <TableRow
-                  className={cn(expandedContent != null && 'cursor-pointer', rowClassName?.(row))}
+                  data-row-key={key}
+                  className={cn(
+                    expandedContent != null && 'cursor-pointer',
+                    dragRowKey === key && 'opacity-40',
+                    overRowKey === key && 'bg-accent',
+                    isDraggedOutOfGroup && 'opacity-30',
+                    rowClassName?.(row)
+                  )}
                   onClick={expandedContent != null ? () => toggleExpanded(key) : undefined}
                 >
+                  {onMoveRow && (
+                    <TableCell
+                      style={{ left: 0 }}
+                      className="sticky z-10 frozen-cell cursor-grab touch-none p-0 text-center align-middle text-muted-foreground/50 hover:text-foreground"
+                      onPointerDown={(event) => startRowReorder(event, row)}
+                      onClick={(event) => event.stopPropagation()}
+                      title="拖曳調整順序"
+                    >
+                      <GripVertical className="mx-auto h-3.5 w-3.5" />
+                    </TableCell>
+                  )}
                   {renderCells(row, isExpanded)}
                   <TableCell aria-hidden />
                 </TableRow>
 
                 {isExpanded && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={visible.length + 1} className="p-3">
+                    <TableCell colSpan={visible.length + 1 + (onMoveRow ? 1 : 0)} className="p-3">
                       {expandedContent}
                     </TableCell>
                   </TableRow>
@@ -371,6 +473,9 @@ export function DataTable<T>({
         {footerRow && (
           <TableFooter>
             <TableRow className="hover:bg-transparent">
+              {onMoveRow && (
+                <TableCell aria-hidden style={{ left: 0 }} className="sticky z-10 frozen-cell p-0" />
+              )}
               {renderCells(footerRow)}
               <TableCell aria-hidden />
             </TableRow>

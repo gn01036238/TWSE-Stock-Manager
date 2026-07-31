@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { useHoldings } from '@/hooks/useHoldings';
 import { useChips } from '@/hooks/useChips';
@@ -94,6 +94,28 @@ function withSign(value: number, text: string): string {
 
 const money = (value: number) => withSign(value, formatCurrency(value));
 
+/** 依存好的順序排 key；新出現或已經不在清單裡的項目，維持原本（資料來源）的相對順序接在後面 */
+function sortByOrder(keys: string[], order: string[]): string[] {
+  if (order.length === 0) return keys;
+  const known = new Set(keys);
+  const sorted = order.filter((key) => known.has(key));
+  for (const key of keys) {
+    if (!sorted.includes(key)) sorted.push(key);
+  }
+  return sorted;
+}
+
+/** 把 fromKey 移到 toKey 現在的位置 */
+function reorderKeys(keys: string[], fromKey: string, toKey: string): string[] {
+  const from = keys.indexOf(fromKey);
+  const to = keys.indexOf(toKey);
+  if (from < 0 || to < 0 || from === to) return keys;
+  const next = [...keys];
+  next.splice(from, 1);
+  next.splice(to, 0, fromKey);
+  return next;
+}
+
 /** 今日損益的組成，滑過去就知道數字怎麼來的 */
 function dayChangeHint(holding: Holding): string {
   const heldShares = holding.shares - holding.todayShares;
@@ -168,6 +190,16 @@ export default function Dashboard() {
   const { symbols: watchlistSymbols, addSymbol: addWatchlistSymbol, removeSymbol: removeWatchlistSymbol, loaded: watchlistLoaded } = useWatchlist();
   const [watchlistDraft, setWatchlistDraft] = useState('');
 
+  // 持股／觀察清單各自的列順序（使用者可拖曳調整），兩組分開存才不會讓拖曳把兩邊混在一起
+  const [holdingOrder, setHoldingOrder] = usePersistentState<string[]>(
+    'twse:overview:holding-order',
+    []
+  );
+  const [watchlistOrder, setWatchlistOrder] = usePersistentState<string[]>(
+    'twse:overview:watchlist-order',
+    []
+  );
+
   // 籌碼只看現在還持有的標的，出清的不顯示
   const heldTickers = useMemo(() => holdings.map((holding) => holding.ticker), [holdings]);
 
@@ -223,19 +255,41 @@ export default function Dashboard() {
     [chipRows]
   );
 
-  const rows: OverviewRow[] = useMemo(() => {
-    const holdingRows = holdings.map((holding) => ({
-      ticker: holding.ticker,
-      name: holding.name,
-      holding,
-      chip: chipByTicker.get(holding.ticker) ?? null,
-      price: prices?.[holding.ticker],
-      intraday: intraday[holding.ticker],
-      candles: candles?.[holding.ticker]?.bars ?? [],
-      dividends: (dividends[holding.ticker]?.dividends as DividendRecord[]) ?? [],
-    }));
+  // 各自排序後的持股／觀察清單代號，拖曳排序與 rows 都以這份為準
+  const orderedHoldingTickers = useMemo(
+    () => sortByOrder(heldTickers, holdingOrder),
+    [heldTickers, holdingOrder]
+  );
+  const watchlistRowTickers = useMemo(
+    () => watchlistEntries.map((entry) => (entry.isTw ? entry.ticker : entry.symbol)),
+    [watchlistEntries]
+  );
+  const orderedWatchlistTickers = useMemo(
+    () => sortByOrder(watchlistRowTickers, watchlistOrder),
+    [watchlistRowTickers, watchlistOrder]
+  );
 
-    const watchlistRows: OverviewRow[] = watchlistEntries.map((entry) => {
+  const rows: OverviewRow[] = useMemo(() => {
+    const holdingByTicker = new Map(holdings.map((holding) => [holding.ticker, holding]));
+    const holdingRows = orderedHoldingTickers.map((ticker) => {
+      const holding = holdingByTicker.get(ticker)!;
+      return {
+        ticker: holding.ticker,
+        name: holding.name,
+        holding,
+        chip: chipByTicker.get(holding.ticker) ?? null,
+        price: prices?.[holding.ticker],
+        intraday: intraday[holding.ticker],
+        candles: candles?.[holding.ticker]?.bars ?? [],
+        dividends: (dividends[holding.ticker]?.dividends as DividendRecord[]) ?? [],
+      };
+    });
+
+    const watchlistByTicker = new Map(
+      watchlistEntries.map((entry) => [entry.isTw ? entry.ticker : entry.symbol, entry])
+    );
+    const watchlistRows: OverviewRow[] = orderedWatchlistTickers.map((ticker) => {
+      const entry = watchlistByTicker.get(ticker)!;
       if (entry.isTw) {
         const chip = chipByTicker.get(entry.ticker) ?? null;
         return {
@@ -264,7 +318,31 @@ export default function Dashboard() {
     });
 
     return [...holdingRows, ...watchlistRows];
-  }, [holdings, chipByTicker, prices, intraday, candles, dividends, watchlistEntries, watchlistIntraday, watchlistQuotes]);
+  }, [
+    holdings,
+    orderedHoldingTickers,
+    chipByTicker,
+    prices,
+    intraday,
+    candles,
+    dividends,
+    watchlistEntries,
+    orderedWatchlistTickers,
+    watchlistIntraday,
+    watchlistQuotes,
+  ]);
+
+  // 拖曳列把手放開時呼叫；持股與觀察清單各自存順序，天然不會互相拖曳過去
+  const moveRow = useCallback(
+    (fromKey: string, toKey: string) => {
+      if (orderedHoldingTickers.includes(fromKey)) {
+        setHoldingOrder(reorderKeys(orderedHoldingTickers, fromKey, toKey));
+        return;
+      }
+      setWatchlistOrder(reorderKeys(orderedWatchlistTickers, fromKey, toKey));
+    },
+    [orderedHoldingTickers, orderedWatchlistTickers, setHoldingOrder, setWatchlistOrder]
+  );
 
   const marketRow: OverviewRow | null = useMemo(() => {
     if (!chipMarket) return null;
@@ -691,6 +769,8 @@ export default function Dashboard() {
               rows={rows}
               rowKey={(row) => row.ticker}
               footerRow={marketRow}
+              rowGroup={(row) => (row.holding ? 'holding' : 'watchlist')}
+              onMoveRow={moveRow}
               renderExpanded={(row) =>
                 row.holding ? <DividendHistory records={row.dividends} /> : null
               }
@@ -712,6 +792,7 @@ export default function Dashboard() {
 
       <p className="text-xs text-muted-foreground">
         持股 {holdings.length} 檔{watchlistEntries.length > 0 ? `，觀察 ${watchlistEntries.length} 檔` : ''}，點任一列可展開配息紀錄。表頭可拖曳調整順序、拖右緣調欄寬，設定會記在這個瀏覽器裡。
+        每列最左邊的把手可拖曳調整順序，持股與觀察清單分開排序，不能互相拖過去。
         今日損益的基準為昨收，當天才買進的部位改以成交價計算，未計手續費。
         日K 為近 20 個交易日，最後一根是當日（盤中還會變動）；價量欄的「價」紅漲綠跌、「量」紅為量增綠為量縮。
         成交量與量比為當日即時；三大法人約 16:00、主力分點更晚才會出當日資料，標題旁的標籤會標明目前看的是哪一天。
