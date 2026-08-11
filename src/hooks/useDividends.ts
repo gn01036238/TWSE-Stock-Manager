@@ -3,13 +3,20 @@
 import { useQuery } from '@tanstack/react-query';
 import type { DividendIncome } from '@/types';
 
+/** JSON 上的一筆配息紀錄：日期是字串，其餘欄位跟 DividendIncome 一樣 */
+export type SerializedDividend = Omit<DividendIncome, 'exDate' | 'paymentDate'> & {
+  exDate: string;
+  paymentDate: string;
+};
+
 interface DividendData {
   stockName: string;
-  dividends: (Omit<DividendIncome, 'exDate' | 'paymentDate'> & {
-    exDate: string;
-    paymentDate: string;
-  })[];
+  dividends: SerializedDividend[];
   totalIncome: number;
+  /** 二代健保補充保費合計 */
+  totalNhiPremium: number;
+  /** 扣掉補充保費後實際入帳的股利合計 */
+  totalNetIncome: number;
   /** 持有期間每股累積配息 */
   dividendPerShare: number;
 }

@@ -7,12 +7,18 @@ export interface Broker {
   created_at: string;
 }
 
+/**
+ * 交易類型。STOCK_DIVIDEND（配股）是除權配到的股票：股數增加但成本不變，
+ * 由 lib/stock-dividend-sync.ts 依 lib/corporate-actions.ts 的除權息自動補進資料表。
+ */
+export type TransactionType = 'BUY' | 'SELL' | 'STOCK_DIVIDEND';
+
 export interface Transaction {
   id: string;
   broker_id: string;
   ticker: string;
   transaction_date: string;
-  transaction_type: 'BUY' | 'SELL';
+  transaction_type: TransactionType;
   quantity: number;
   price: number;
   commission: number;
@@ -205,10 +211,18 @@ export interface DividendEvent {
   exDate: Date;
   paymentDate: Date;
   amount: number; // TWD per share
-  /** 除息前最後一個交易日收盤價 */
+  /** 每股股票股利（元）；只有 lib/corporate-actions.ts 列到的除權息才有 */
+  stockPerShare?: number;
+  /** 除權息前最後一個交易日收盤價 */
   priceBefore?: number;
   /** 單次現金殖利率 = amount / priceBefore */
   yieldPercent?: number;
+  /**
+   * 填權（息）天數：除權息日起算第幾個交易日，還原價回到除權前股價。
+   * 還原價 = 收盤價 ×（1 ＋ 每股股票股利 ÷ 面額）＋ 每股現金股利。
+   * 還沒填回去（或算不出除權前股價）為 null。
+   */
+  daysToFill?: number | null;
 }
 
 export interface DividendIncome {
@@ -217,10 +231,22 @@ export interface DividendIncome {
   exDate: Date;
   paymentDate: Date;
   amount: number;
+  /** 每股股票股利（元） */
+  stockPerShare: number;
   priceBefore?: number;
   yieldPercent?: number;
+  daysToFill: number | null;
   sharesHeld: number;
+  /** 這次除權配到的股數（無條件捨去，畸零股折現） */
+  sharesGained: number;
+  /** 現金股利 = sharesHeld × amount */
   income: number;
+  /** 二代健保的給付金額 = 現金股利 ＋ 配股面額 */
+  nhiBase: number;
+  /** 二代健保補充保費（就源扣繳） */
+  nhiPremium: number;
+  /** 實發股利 = 現金股利 − 補充保費 */
+  netIncome: number;
 }
 
 export interface PortfolioSummary {

@@ -10,13 +10,19 @@ CREATE TABLE IF NOT EXISTS brokers (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Transactions table (BUY and SELL only - dividends are auto-tracked)
+-- Transactions table
+--   BUY / SELL       - 實際買賣，現金股利仍然是自動計算不入表
+--   STOCK_DIVIDEND   - 除權配到的股票（配股）。price / commission / tax 都是 0：
+--                      股數增加但成本不變。由 src/lib/stock-dividend-sync.ts 依
+--                      src/lib/corporate-actions.ts 的除權息設定自動補寫，
+--                      以（ticker, transaction_date）判重，不會重複寫入。
 CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   broker_id UUID REFERENCES brokers(id),
   ticker VARCHAR(10) NOT NULL,
   transaction_date DATE NOT NULL,
-  transaction_type VARCHAR(10) NOT NULL CHECK (transaction_type IN ('BUY', 'SELL')),
+  transaction_type VARCHAR(20) NOT NULL
+    CHECK (transaction_type IN ('BUY', 'SELL', 'STOCK_DIVIDEND')),
   quantity NUMERIC(12,2) NOT NULL,
   price NUMERIC(12,4) NOT NULL,
   commission NUMERIC(10,2) DEFAULT 0,
@@ -24,6 +30,18 @@ CREATE TABLE IF NOT EXISTS transactions (
   decision_reason TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 既有資料庫的升級（CREATE TABLE IF NOT EXISTS 不會動到已經存在的表）：
+-- 放寬 transaction_type 讓「配股」寫得進去。重跑安全。
+ALTER TABLE transactions ALTER COLUMN transaction_type TYPE VARCHAR(20);
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_transaction_type_check;
+ALTER TABLE transactions ADD CONSTRAINT transactions_transaction_type_check
+  CHECK (transaction_type IN ('BUY', 'SELL', 'STOCK_DIVIDEND'));
+
+-- 同一檔股票的同一次除權息只會有一筆配股，避免自動補寫重複
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_stock_dividend_once
+  ON transactions(ticker, transaction_date)
+  WHERE transaction_type = 'STOCK_DIVIDEND';
 
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_transactions_ticker_date ON transactions(ticker, transaction_date);

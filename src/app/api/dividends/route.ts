@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
       stockName,
       dividends: serializedIncome,
       totalIncome: dividendIncome.reduce((sum, d) => sum + d.income, 0),
+      totalNhiPremium: dividendIncome.reduce((sum, d) => sum + d.nhiPremium, 0),
+      totalNetIncome: dividendIncome.reduce((sum, d) => sum + d.netIncome, 0),
       dividendPerShare: dividendIncome.reduce((sum, d) => sum + d.amount, 0),
     });
   } catch (error) {
@@ -77,6 +79,8 @@ export async function POST(request: NextRequest) {
               paymentDate: d.paymentDate.toISOString(),
             })),
             totalIncome: dividendIncome.reduce((sum, d) => sum + d.income, 0),
+            totalNhiPremium: dividendIncome.reduce((sum, d) => sum + d.nhiPremium, 0),
+            totalNetIncome: dividendIncome.reduce((sum, d) => sum + d.netIncome, 0),
             dividendPerShare: dividendIncome.reduce((sum, d) => sum + d.amount, 0),
           };
         } catch (err) {

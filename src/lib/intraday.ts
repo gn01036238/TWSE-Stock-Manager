@@ -56,7 +56,13 @@ async function fetchYahooBars(ticker: string): Promise<YahooBars | null> {
       const bars = await fetchBars(symbol);
       if (bars) return bars;
     } catch (error) {
-      console.error(`Failed to fetch intraday chart for ${symbol}:`, error);
+      // Yahoo 對已下市／已合併的股票兩個後綴都會丟這個錯誤，之後每次盤中都會再問一次、
+      // 再噴一次——這是預期狀況（TWSE 那邊也查不到），不是真的失敗，不用洗 console
+      const isKnownMissing =
+        error instanceof Error && /No data found, symbol may be delisted/.test(error.message);
+      if (!isKnownMissing) {
+        console.error(`Failed to fetch intraday chart for ${symbol}:`, error);
+      }
     }
   }
 

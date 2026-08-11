@@ -282,7 +282,7 @@ export default function Dashboard() {
         price: prices?.[holding.ticker],
         intraday: intraday[holding.ticker],
         candles: candles?.[holding.ticker]?.bars ?? [],
-        dividends: (dividends[holding.ticker]?.dividends as DividendRecord[]) ?? [],
+        dividends: dividends[holding.ticker]?.dividends ?? [],
       };
     });
 

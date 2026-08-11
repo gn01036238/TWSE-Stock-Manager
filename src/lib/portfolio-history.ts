@@ -47,7 +47,8 @@ function replayTicker(transactions: Transaction[]): TickerState[] {
   const states: TickerState[] = [];
 
   for (const tx of sortByTradeOrder(transactions)) {
-    if (tx.transaction_type === 'BUY') {
+    // 配股跟買入一樣增加股數，只是 price 與 commission 都是 0，成本自然不變
+    if (tx.transaction_type !== 'SELL') {
       totalCost += tx.quantity * tx.price + (tx.commission || 0);
       shares += tx.quantity;
       buyQueue.push({ quantity: tx.quantity, price: tx.price, commission: tx.commission || 0 });

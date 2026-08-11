@@ -21,15 +21,20 @@ export function groupByTicker(transactions: Transaction[]): Map<string, Transact
   return grouped;
 }
 
+/** 增加股數的類型（買入、配股）排在賣出前面 */
+const TRADE_ORDER: Record<Transaction['transaction_type'], number> = {
+  BUY: 0,
+  STOCK_DIVIDEND: 0,
+  SELL: 1,
+};
+
 /** 日期升冪，同一天買入排在賣出前面（當沖才配對得起來） */
 export function sortByTradeOrder(transactions: Transaction[]): Transaction[] {
   return [...transactions].sort((a, b) => {
     const dateCompare =
       new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime();
     if (dateCompare !== 0) return dateCompare;
-    if (a.transaction_type === 'BUY' && b.transaction_type === 'SELL') return -1;
-    if (a.transaction_type === 'SELL' && b.transaction_type === 'BUY') return 1;
-    return 0;
+    return TRADE_ORDER[a.transaction_type] - TRADE_ORDER[b.transaction_type];
   });
 }
 
@@ -78,7 +83,17 @@ export function computeHoldings(
       // 日期可能帶時間（DB 為 date 欄位，但匯入來源不一），只比對 YYYY-MM-DD
       const isToday = tradingDate != null && tx.transaction_date.slice(0, 10) === tradingDate;
 
-      if (tx.transaction_type === 'BUY') {
+      if (tx.transaction_type === 'STOCK_DIVIDEND') {
+        // 配股：股數增加、成本不變（所以均價會被稀釋，這正是除權後該有的樣子）
+        shares += tx.quantity;
+
+        if (isToday && priceData && priceData.price > 0) {
+          // 除權當天配到的股票沒有昨收可比，用現價當基準讓它對今日損益貢獻 0
+          todayLots.push({ quantity: tx.quantity, price: priceData.price });
+        } else {
+          sharesBeforeToday += tx.quantity;
+        }
+      } else if (tx.transaction_type === 'BUY') {
         totalCost += tx.quantity * tx.price + (tx.commission || 0);
         shares += tx.quantity;
 
@@ -180,7 +195,8 @@ export function computeRealizedGains(
     const sortedTxns = sortByTradeOrder(txns);
 
     for (const tx of sortedTxns) {
-      if (tx.transaction_type === 'BUY') {
+      if (tx.transaction_type === 'BUY' || tx.transaction_type === 'STOCK_DIVIDEND') {
+        // 配股是零成本的批次（price 為 0），賣掉時整筆都是已實現獲利
         buyQueue.push({
           quantity: tx.quantity,
           price: tx.price,
@@ -248,7 +264,8 @@ export function computeTransactionPnL(
     for (const tx of sortByTradeOrder(txns)) {
       if (tx.quantity <= 0) continue;
 
-      if (tx.transaction_type === 'BUY') {
+      // 配股跟買入一樣是「進貨」，只是成本為 0
+      if (tx.transaction_type !== 'SELL') {
         const feePerShare = (tx.commission || 0) / tx.quantity;
 
         result.set(tx.id, {
@@ -317,7 +334,7 @@ export function computeTransactionPnL(
 
     for (const tx of txns) {
       const pnl = result.get(tx.id);
-      if (!pnl || tx.transaction_type !== 'BUY') continue;
+      if (!pnl || tx.transaction_type === 'SELL') continue;
 
       // 全部賣掉了就沒有未實現的部分
       if (pnl.heldShares <= 0) pnl.unrealized = 0;

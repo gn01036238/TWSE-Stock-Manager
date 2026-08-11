@@ -6,16 +6,34 @@ import {
   updateTransaction,
   getBrokers,
 } from '@/lib/supabase';
+import { syncStockDividendTransactions } from '@/lib/stock-dividend-sync';
 import type { Transaction } from '@/types';
 
 export async function GET() {
   try {
-    const transactions = await getTransactions();
+    let transactions = await getTransactions();
+
+    // 除權配股要變成一筆真的交易紀錄，持股數才會對。已經補過的不會再寫，
+    // 所以這裡每次都跑；穩定狀態下不會多打任何一次資料庫。
+    let stockDividendError: string | null = null;
+    try {
+      const added = await syncStockDividendTransactions(transactions);
+      if (added.length > 0) transactions = await getTransactions();
+    } catch (error) {
+      // 補不進去（最常見是資料表的 transaction_type 檢查條件還沒加上 STOCK_DIVIDEND）
+      // 不該讓整個交易紀錄跟著壞掉，交易照樣回、把原因帶給前端顯示就好
+      console.error('Stock dividend sync error:', error);
+      // supabase-js 丟的是普通物件不是 Error，直接取 message 才看得到真正的原因
+      const message = (error as { message?: string } | null)?.message;
+      stockDividendError = message || '配股紀錄補寫失敗';
+    }
+
     const brokers = await getBrokers();
 
     return NextResponse.json({
       transactions,
       brokers,
+      stockDividendError,
     });
   } catch (error) {
     console.error('Get transactions error:', error);

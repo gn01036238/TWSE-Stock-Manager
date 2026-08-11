@@ -6,6 +6,8 @@ import type { Transaction, Broker } from '@/types';
 interface TransactionsResponse {
   transactions: Transaction[];
   brokers: Broker[];
+  /** 自動補寫「配股」交易失敗的原因；成功或沒東西要補時為 null */
+  stockDividendError?: string | null;
 }
 
 export function useTransactions() {

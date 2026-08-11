@@ -28,11 +28,13 @@ src/
 ├── components/
 │   ├── ui/                # Shadcn/ui components
 │   ├── data-table.tsx     # 欄寬可拖曳、欄位可拖曳排序的表格（設定存 localStorage）
+│   ├── dividend-history.tsx # 配息紀錄表格與共用欄位定義（總覽展開列／股利收入頁共用）
 │   ├── sparkline.tsx      # 走勢圖；給了 offsets/sessionMinutes 就用固定的 09:00–13:30 X 軸
 │   ├── navbar.tsx         # Navigation
 │   └── providers.tsx      # Query client provider
 ├── hooks/                 # Custom React hooks (useHoldings, useTransactions, usePrices, useDividends)
 ├── lib/                   # Utilities (supabase, twse, calculations, csv-parser, dividends,
+│                          #   corporate-actions, nhi, stock-dividend-sync,
 │                          #   intraday, intraday-store, indices, volume, institutional, major)
 └── types/index.ts         # TypeScript interfaces
 ```
@@ -99,6 +101,29 @@ npm run lint     # Run ESLint
 - **Tax**: 0.3% stocks, 0.1% ETFs (tickers starting with "00")
 - **Currency**: TWD, no decimals
 
+### 除權息與配股（重要）
+
+- **現金股利走 Yahoo，股票股利（配股）只走 `lib/corporate-actions.ts` 的手動清單**。
+  Yahoo 的 chart events 沒有可靠的台股配股資料，新增一次除權息就在那個陣列加一筆，
+  配息紀錄的欄位與交易紀錄裡的配股都會自動跟上
+- **Yahoo 的 close 與股利金額都是分割還原後的數字**。台股的配股在 Yahoo 記成分割
+  （2887 的 0.1 元股票股利＝1.01 分割），所以除權日以前的收盤價與配息都先被除掉 1.01
+  （0.9 元的股利會變成 0.891089）。`lib/dividends.ts` 的 `unadjustFactor()` 會把
+  之後所有分割的倍數乘回去，除權前股價、每股配息、填權判斷都用還原後的實際價格
+- **`getSharesAtDate()` 是嚴格小於除權息日**：除權息當天買進不參與這次配息，
+  這同時讓自動補進來的配股（日期就是除權息日）不會被拿去再配一次息
+- **填權天數**：從除權息日起算，第幾個交易日的 `收盤價 ×(1 + 股票股利/10) + 現金股利`
+  回到除權前股價。只比收盤價的話，配股愈多就愈不可能填權
+- **二代健保補充保費**（`lib/nhi.ts`）：單次給付達 20,000 元就源扣繳 2.11%，
+  上限 1,000 萬。**股票股利以面額 10 元併入給付金額**再判斷門檻。
+  實發股利 = 現金股利 − 補充保費；總覽與摘要的「累積股利」仍是未扣的金額
+- **配股交易**（`transaction_type = 'STOCK_DIVIDEND'`）由 `lib/stock-dividend-sync.ts`
+  在 `GET /api/transactions` 時自動補寫，以（ticker, transaction_date）判重，重跑不會重複。
+  股數 = 除權前持股 × 每股股票股利 ÷ 10（畸零股折現，無條件捨去），
+  price/commission/tax 都是 0 → 成本不變、均價被稀釋，賣掉時整筆都是已實現獲利。
+  所有算股數的地方（`computeHoldings`、`computeRealizedGains`、`computeTransactionPnL`、
+  `portfolio-history` 的 `replayTicker`、`getSharesAtDate`）都把它當成零成本的買入
+
 ### CSV Import
 - Supports Taiwan broker format (Chinese column headers)
 - Date format: "2022/5/30" → "2022-05-05"
@@ -120,7 +145,12 @@ npm run lint     # Run ESLint
 
 Two tables in Supabase:
 - `brokers`: id, name, commission_rate, commission_discount
-- `transactions`: id, broker_id, ticker, transaction_date, transaction_type (BUY/SELL), quantity, price, commission, tax, decision_reason
+- `transactions`: id, broker_id, ticker, transaction_date,
+  transaction_type (BUY/SELL/STOCK_DIVIDEND), quantity, price, commission, tax, decision_reason
+
+`STOCK_DIVIDEND` 需要放寬 `transaction_type` 的 CHECK 條件，見
+`supabase-migration-stock-dividend.sql`（貼到 Supabase SQL Editor 跑一次，重跑安全）。
+沒跑之前配股補寫會失敗，交易記錄頁會顯示一條琥珀色提示，其餘功能不受影響。
 
 Both tables have RLS enabled with no policies. All DB access goes through server-side
 API routes using the secret (service_role) key, which bypasses RLS. The anon key would

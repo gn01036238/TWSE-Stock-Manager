@@ -28,9 +28,22 @@ import {
   formatPercent,
 } from '@/lib/calculations';
 import { gainTextClass } from '@/lib/colors';
-import type { Broker, StockPrice, TransactionPnL } from '@/types';
+import type { Broker, StockPrice, TransactionPnL, TransactionType } from '@/types';
 
 const ALL = 'all';
+
+const TYPE_LABEL: Record<TransactionType, string> = {
+  BUY: '買入',
+  SELL: '賣出',
+  STOCK_DIVIDEND: '配股',
+};
+
+/** 配股是零成本入帳，用另一個底色跟真正的買賣分開 */
+const TYPE_BADGE: Record<TransactionType, 'default' | 'destructive' | 'secondary'> = {
+  BUY: 'default',
+  SELL: 'destructive',
+  STOCK_DIVIDEND: 'secondary',
+};
 
 /** 正號要自己補，負數本身已經帶負號 */
 function withSign(value: number, text: string): string {
@@ -40,9 +53,14 @@ function withSign(value: number, text: string): string {
 /** 滑過損益數字就知道這個數字是怎麼來的 */
 function pnlHint(
   pnl: TransactionPnL,
-  type: 'BUY' | 'SELL',
+  type: TransactionType,
   price: StockPrice | undefined
 ): string {
+  if (type === 'STOCK_DIVIDEND') {
+    const at = price ? `，現價 ${price.price.toFixed(2)}` : '';
+    return `配股沒有成本，還持有的 ${pnl.heldShares.toLocaleString()} 股整筆都是獲利${at}`;
+  }
+
   if (type === 'SELL') {
     return `已實現 ${withSign(pnl.realized, formatCurrency(pnl.realized))}（賣出淨收入 − FIFO 買入成本 ${formatCurrency(
       pnl.basis
@@ -75,7 +93,7 @@ function PnLCell({
   price,
 }: {
   pnl: TransactionPnL | undefined;
-  type: 'BUY' | 'SELL';
+  type: TransactionType;
   price: StockPrice | undefined;
 }) {
   if (!pnl || pnl.gain == null) {
@@ -198,6 +216,17 @@ export default function TransactionsPage() {
         </Link>
       </div>
 
+      {data?.stockDividendError && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardContent className="py-3 text-sm text-amber-900">
+            配股紀錄補寫失敗：{data.stockDividendError}
+            <br />
+            資料表的 transaction_type 檢查條件可能還沒加上 STOCK_DIVIDEND，
+            請把 supabase-migration-stock-dividend.sql 貼到 Supabase SQL Editor 執行一次。
+          </CardContent>
+        </Card>
+      )}
+
       {/* Filters：三個下拉都只列出交易紀錄裡真的出現過的選項 */}
       <Card>
         <CardContent className="py-4">
@@ -225,6 +254,7 @@ export default function TransactionsPage() {
                 <SelectItem value={ALL}>全部類型</SelectItem>
                 <SelectItem value="BUY">買入</SelectItem>
                 <SelectItem value="SELL">賣出</SelectItem>
+                <SelectItem value="STOCK_DIVIDEND">配股</SelectItem>
               </SelectContent>
             </Select>
             <Select value={filterBroker} onValueChange={setFilterBroker}>
@@ -288,10 +318,8 @@ export default function TransactionsPage() {
                   <TableRow key={tx.id}>
                     <TableCell>{tx.transaction_date}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={tx.transaction_type === 'BUY' ? 'default' : 'destructive'}
-                      >
-                        {tx.transaction_type === 'BUY' ? '買入' : '賣出'}
+                      <Badge variant={TYPE_BADGE[tx.transaction_type]}>
+                        {TYPE_LABEL[tx.transaction_type]}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -306,10 +334,19 @@ export default function TransactionsPage() {
                       {tx.quantity.toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      {tx.price.toFixed(2)}
+                      {/* 配股不用花錢買，價格與金額都留白比顯示 0 清楚 */}
+                      {tx.transaction_type === 'STOCK_DIVIDEND' ? (
+                        <span className="text-muted-foreground">-</span>
+                      ) : (
+                        tx.price.toFixed(2)
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
-                      {formatCurrency(tx.quantity * tx.price)}
+                      {tx.transaction_type === 'STOCK_DIVIDEND' ? (
+                        <span className="text-muted-foreground">-</span>
+                      ) : (
+                        formatCurrency(tx.quantity * tx.price)
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <PnLCell
@@ -355,6 +392,8 @@ export default function TransactionsPage() {
         損益欄：賣出為 FIFO 配對買入成本後的已實現損益（已扣手續費與交易稅）；
         買入為「已被賣掉的部分（已實現）＋ 還持有的部分以現價計算（未實現）」，滑過數字可看組成。
         找不到對應買入紀錄或抓不到現價時顯示 --。
+        「配股」是除權配到的股票，由系統依除權息設定自動補寫：股數增加、成本為 0（所以均價會被稀釋），
+        賣掉時整筆都算已實現獲利，也因為成本是 0 所以沒有報酬率。
       </p>
     </div>
   );
