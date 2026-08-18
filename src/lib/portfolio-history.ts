@@ -1,9 +1,9 @@
 import type { Transaction } from '@/types';
-import { groupByTicker, sortByTradeOrder } from './calculations';
+import { computeHoldings, groupByTicker, sortByTradeOrder } from './calculations';
 import { fetchDailyBars } from './daily-bars';
 import { calculateDividendIncome, fetchDividendHistory } from './dividends';
 import { fetchIntradaySeries } from './intraday';
-import { taipeiDateKey, SESSION_MINUTES } from './market';
+import { taipeiDateKey, latestTradingDateKey, SESSION_MINUTES } from './market';
 import { fetchStockPrices } from './twse';
 
 export type HistoryRange = '1D' | '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y' | 'MAX';
@@ -18,6 +18,12 @@ export interface PortfolioHistoryPoint {
 export interface PortfolioHistorySeries {
   range: HistoryRange;
   points: PortfolioHistoryPoint[];
+  /**
+   * 這段區間「損益 ±0」的位置：1D 是昨收基準值（今日買進的部位以成交價計，同總覽的今日損益），
+   * 其餘區間是區間開始前一個交易日的收盤值。走勢圖的灰色基準線畫在這裡——
+   * 不是第一個點（開盤價），開盤本身就已經跳空賺賠過一次了
+   */
+  baseline?: { marketValue: number; totalPnl: number };
   /** 只有 1D 有值：跟 points 等長，距離開盤幾分鐘，走勢圖用來畫固定 09:00–13:30 的 X 軸 */
   offsets?: number[];
   sessionMinutes?: number;
@@ -164,9 +170,17 @@ export async function fetchDailyPortfolioHistory(
   if (calendar.length === 0) {
     calendar = Array.from(new Set(barsEntries.flatMap(([, bars]) => bars.map((b) => b.date)))).sort();
   }
-  if (cutoff) calendar = calendar.filter((d) => d >= cutoff);
-  if (range === '5D') calendar = calendar.slice(-5);
   if (calendar.length === 0) return { range, points: [] };
+
+  // 區間的第一天在 calendar 的位置。前面那幾天照樣算（只是不畫），
+  // 因為基準線要的是「區間開始前一個交易日的收盤」——區間第一天自己的漲跌也算在這段裡面
+  let startIdx = 0;
+  if (cutoff) {
+    const idx = calendar.findIndex((d) => d >= cutoff);
+    if (idx < 0) return { range, points: [] };
+    startIdx = idx;
+  }
+  if (range === '5D') startIdx = Math.max(0, calendar.length - 5);
 
   const byTicker = groupByTicker(transactions);
   const statesByTicker = new Map(tickers.map((t) => [t, replayTicker(byTicker.get(t) || [])]));
@@ -195,7 +209,7 @@ export async function fetchDailyPortfolioHistory(
   let divIdx = 0;
   let cumDividends = 0;
 
-  const points: PortfolioHistoryPoint[] = calendar.map((date) => {
+  const allPoints: PortfolioHistoryPoint[] = calendar.map((date) => {
     while (divIdx < dividendPoints.length && dividendPoints[divIdx].date <= date) {
       cumDividends += dividendPoints[divIdx].income;
       divIdx++;
@@ -217,7 +231,15 @@ export async function fetchDailyPortfolioHistory(
     return { date, marketValue, totalPnl };
   });
 
-  return { range, points };
+  const points = allPoints.slice(startIdx);
+  if (points.length === 0) return { range, points: [] };
+
+  const prev = startIdx > 0 ? allPoints[startIdx - 1] : null;
+  return {
+    range,
+    points,
+    baseline: prev ? { marketValue: prev.marketValue, totalPnl: prev.totalPnl } : undefined,
+  };
 }
 
 /**
@@ -300,7 +322,34 @@ export async function fetchIntradayPortfolioHistory(
     };
   });
 
-  return { range: '1D', points, offsets, sessionMinutes: SESSION_MINUTES };
+  // 今日損益 ±0 的市值：昨日持股用昨收、今日買進的部位用成交價，直接沿用 computeHoldings
+  // 算好的 dayBasis，這樣灰線的位置跟摘要的今日損益一定對得起來。
+  // 昨收或報價抓不到（dayBasis 為 0）的那檔就用現值頂替，等於它對今日損益貢獻 0
+  const tradingDate =
+    Array.from(prices.values())
+      .map((p) => p.tradingDate)
+      .filter((d): d is string => !!d)
+      .sort()
+      .at(-1) ?? latestTradingDateKey();
+  const baselineMarketValue = computeHoldings(
+    transactions,
+    prices,
+    new Map(),
+    new Map(),
+    tradingDate
+  ).reduce((sum, h) => sum + (h.dayBasis > 0 ? h.dayBasis : h.marketValue), 0);
+
+  return {
+    range: '1D',
+    points,
+    baseline: {
+      marketValue: baselineMarketValue,
+      // 盤中只有市值會動，所以損益的基準跟著市值平移同一個常數
+      totalPnl: baselineMarketValue - marketValueNow + totalPnlNow,
+    },
+    offsets,
+    sessionMinutes: SESSION_MINUTES,
+  };
 }
 
 export async function fetchPortfolioHistory(

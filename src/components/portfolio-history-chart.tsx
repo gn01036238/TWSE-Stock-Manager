@@ -142,7 +142,7 @@ function BaselineLabel({
 
 /**
  * 總覽頁的績效走勢圖：總市值 + 總損益（未實現＋已實現＋股利）雙 Y 軸疊在同一張圖。
- * 損益線以「起點」（1D 是開盤，其餘區間是期初）為界拆成紅（正）綠（負）兩段，
+ * 損益線以基準線（1D 是昨收，其餘區間是區間前一個收盤）為界拆成紅（賺）綠（賠）兩段，
  * 用 SVG gradient 的硬轉折做出來，不是漸層。
  */
 export function PortfolioHistoryChart() {
@@ -161,17 +161,18 @@ export function PortfolioHistoryChart() {
   const { mvDomain, pnlDomain, mvBaseline, baseline, baselineOffset } = useMemo(() => {
     const marketValues = chartData.map((p) => p.marketValue);
     const pnlValues = chartData.map((p) => p.totalPnl);
-    // 基準線改成「起點」（1D 就是開盤）而不是 0，總市值天生離 0 很遠，
-    // 硬把 0 塞進 Y 軸範圍只會把真正的漲跌幅擠成一條貼平的線
-    const mvBase = marketValues[0] ?? 0;
-    const base = pnlValues[0] ?? 0;
+    // 基準線是「這段區間損益 ±0 的位置」＝ 前一個收盤（1D 就是昨收），不是第一個點，
+    // 也不是總損益 0——總損益含已實現與股利，天生離 0 很遠，硬把它塞進 Y 軸只會把走勢壓平。
+    // 昨收常常落在當日高低點之外，所以要一起算進 min/max，不然全紅或全綠的日子會看不到線
+    const mvBase = data?.baseline?.marketValue ?? marketValues[0] ?? 0;
+    const base = data?.baseline?.totalPnl ?? pnlValues[0] ?? 0;
 
-    const mvMin = Math.min(...marketValues);
-    const mvMax = Math.max(...marketValues);
+    const mvMin = Math.min(...marketValues, mvBase);
+    const mvMax = Math.max(...marketValues, mvBase);
     const mvPad = (mvMax - mvMin) * 0.15 || Math.max(Math.abs(mvMax) * 0.01, 1);
 
-    const pnlMin = Math.min(...pnlValues);
-    const pnlMax = Math.max(...pnlValues);
+    const pnlMin = Math.min(...pnlValues, base);
+    const pnlMax = Math.max(...pnlValues, base);
     const pnlPad = (pnlMax - pnlMin) * 0.15 || Math.max(Math.abs(base) * 0.01, 1);
 
     const pnlLow = pnlMin - pnlPad;
@@ -187,9 +188,10 @@ export function PortfolioHistoryChart() {
       baseline: base,
       baselineOffset: offset,
     };
-  }, [chartData]);
+  }, [chartData, data]);
 
-  const baselineLabel = range === '1D' ? '開盤' : '期初';
+  const baselineLabel =
+    range !== '1D' ? '期初' : data?.baseline ? '昨收' : '開盤';
 
   // 高點：兩條線各自在目前這段區間的最大值，標在圖上
   const { mvPeak, pnlPeak } = useMemo(() => {
@@ -309,7 +311,7 @@ export function PortfolioHistoryChart() {
                   dot={false}
                   isAnimationActive={false}
                 />
-                {/* 基準線畫在資料線之後（才不會被蓋住），並直接標文字說明是開盤／期初，不能只靠一條虛線讓人猜 */}
+                {/* 基準線畫在資料線之後（才不會被蓋住），並直接標文字說明是昨收／期初，不能只靠一條虛線讓人猜 */}
                 <ReferenceLine
                   yAxisId="value"
                   y={mvBaseline}
