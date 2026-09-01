@@ -127,6 +127,7 @@ interface YahooQuoteLite {
   price: number | null;
   previousClose: number | null;
   name: string | null;
+  open: number | null;
   high: number | null;
   low: number | null;
   volume: number | null;
@@ -172,6 +173,7 @@ async function fetchYahooQuotes(
           (typeof q.longName === 'string' && q.longName) ||
           (typeof q.shortName === 'string' && q.shortName) ||
           null,
+        open: typeof q.regularMarketOpen === 'number' ? q.regularMarketOpen : null,
         high: typeof q.regularMarketDayHigh === 'number' ? q.regularMarketDayHigh : null,
         low: typeof q.regularMarketDayLow === 'number' ? q.regularMarketDayLow : null,
         volume: typeof q.regularMarketVolume === 'number' ? q.regularMarketVolume : null,
@@ -223,6 +225,7 @@ export async function fetchStockPrices(tickers: string[]): Promise<Map<string, S
       previousClose: previousClose ?? currentPrice,
       change,
       changePercent: previousClose ? (change / previousClose) * 100 : 0,
+      open: num(item?.o) ?? yahoo?.open ?? currentPrice,
       high: num(item?.h) ?? yahoo?.high ?? currentPrice,
       low: num(item?.l) ?? yahoo?.low ?? currentPrice,
       // 一律以「張」為單位：TWSE 的 v 已是張，Yahoo 給的是股數

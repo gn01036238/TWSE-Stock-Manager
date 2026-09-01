@@ -66,6 +66,8 @@ export interface StockPrice {
   previousClose: number;
   change: number;
   changePercent: number;
+  /** 今日開盤價；還沒開盤或抓不到時等於現價 */
+  open: number;
   high: number;
   low: number;
   volume: number;

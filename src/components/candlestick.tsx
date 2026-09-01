@@ -17,6 +17,59 @@ function formatOhlc(bar: DailyBar): string {
 }
 
 /**
+ * 單獨一根當日 K 棒（漲跌幅欄位用），高低價撐滿整個高度。
+ * 盤中還沒有波動（高＝低）時退成一條橫線。
+ */
+export function DayCandle({
+  bar,
+  width = 9,
+  height = 14,
+  className = '',
+}: {
+  bar: DailyBar;
+  width?: number;
+  height?: number;
+  className?: string;
+}) {
+  const range = bar.high - bar.low || 1;
+  const toY = (value: number) => (1 - (value - bar.low) / range) * height;
+
+  const color = barColor(bar);
+  const center = width / 2;
+  const bodyWidth = Math.max(2, width * 0.7);
+  const top = toY(Math.max(bar.open, bar.close));
+  const bodyHeight = Math.max(1, toY(Math.min(bar.open, bar.close)) - top);
+
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className={`shrink-0 ${className}`}
+      role="img"
+      aria-label={`當日 K 棒 ${formatOhlc(bar)}`}
+    >
+      <title>{formatOhlc(bar)}</title>
+      <line
+        x1={center}
+        x2={center}
+        y1={toY(bar.high)}
+        y2={toY(bar.low)}
+        stroke={color}
+        strokeWidth="1"
+      />
+      <rect
+        x={center - bodyWidth / 2}
+        y={top}
+        width={bodyWidth}
+        height={bodyHeight}
+        fill={color}
+      />
+    </svg>
+  );
+}
+
+/**
  * 表格裡的迷你日 K 棒圖。最後一根是最新交易日（盤中還會動），
  * 滑過去可以看最新一根的開高低收。
  */

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { DayCandle } from '@/components/candlestick';
 import { LivePrice } from '@/components/live-price';
 import { gainTextClass } from '@/lib/colors';
 import type { StockPrice } from '@/types';
@@ -18,13 +18,21 @@ export function DayChange({
   }
 
   const isUp = price.change >= 0;
-  const Icon = isUp ? ArrowUp : ArrowDown;
   const color = gainTextClass(price.change);
   const sign = isUp ? '+' : '';
 
   return (
     <span className={`inline-flex items-center justify-end gap-1 ${color}`}>
-      <Icon className="h-3.5 w-3.5" />
+      <DayCandle
+        bar={{
+          date: price.tradingDate ?? '今日',
+          open: price.open,
+          high: price.high,
+          low: price.low,
+          close: price.price,
+          volume: null,
+        }}
+      />
       {showAmount && (
         <LivePrice
           value={price.change}
