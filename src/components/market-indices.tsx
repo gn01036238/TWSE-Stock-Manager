@@ -75,10 +75,11 @@ export function MarketIndices({ className = '' }: { className?: string }) {
                     {quote.change >= 0 ? '+' : ''}
                     {quote.changePercent.toFixed(2)}%
                   </span>
+                  {/* 這條只有 52px 寬。台股若照 09:00–13:30 的固定時間軸畫，盤中
+                      就只填得到左邊一小截，跟旁邊平均分佈的國外指數看起來不齊，
+                      所以指標條一律平均分佈，每格都用滿整個寬度 */}
                   <Sparkline
                     points={quote.points ?? []}
-                    offsets={quote.offsets}
-                    sessionMinutes={quote.sessionMinutes}
                     baseline={quote.previousClose}
                     width={52}
                     height={18}

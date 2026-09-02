@@ -3,7 +3,7 @@ import { addDays } from 'date-fns';
 import { PAR_VALUE, corporateActionsFor, sharesFromStockDividend } from './corporate-actions';
 import { taipeiDateKey } from './market';
 import { nhiPremium } from './nhi';
-import { getYahooClient, toYahooSymbols } from './yahoo';
+import { getYahooClient, isSymbolNotFound, toYahooSymbols } from './yahoo';
 
 const DIVIDEND_HISTORY_START = '2010-01-01';
 
@@ -185,7 +185,9 @@ export async function fetchDividendHistory(ticker: string): Promise<DividendEven
 
       return merged.sort((a, b) => a.exDate.getTime() - b.exDate.getTime());
     } catch (error) {
-      console.error(`Failed to fetch dividends for ${symbol}:`, error);
+      if (!isSymbolNotFound(error)) {
+        console.error(`Failed to fetch dividends for ${symbol}:`, error);
+      }
     }
   }
 

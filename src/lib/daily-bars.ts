@@ -1,5 +1,5 @@
 import type { DailyBar } from '@/types';
-import { getYahooClient, toYahooSymbols } from './yahoo';
+import { getYahooClient, isSymbolNotFound, toYahooSymbols } from './yahoo';
 import { taipeiDateKey } from './market';
 
 /** 預設抓多少天的日線回來（含假日，實際交易日約 2/3） */
@@ -84,7 +84,9 @@ export async function fetchDailyBars(
       bars = await fetchFromYahoo(symbol, days);
       if (bars.length > 0) break;
     } catch (error) {
-      console.error(`Failed to fetch daily bars for ${symbol}:`, error);
+      if (!isSymbolNotFound(error)) {
+        console.error(`Failed to fetch daily bars for ${symbol}:`, error);
+      }
     }
   }
 

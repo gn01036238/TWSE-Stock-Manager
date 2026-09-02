@@ -400,13 +400,13 @@ export default function Dashboard() {
       {
         id: 'trend',
         header: '今日走勢',
-        headerText: '今日走勢（X 軸固定為 09:00–13:30，一分鐘取樣；非台股交易時段不同，改平均分佈）',
+        headerText: '今日走勢（一分鐘取樣，平均分佈到整個欄寬）',
         width: 100,
+        // 欄位只有 80px 寬，照 09:00–13:30 的固定時間軸畫盤中會只填左邊一小截，
+        // 跟時段不同的美股列也對不齊，所以一律把點平均攤滿整個寬度
         cell: (row) => (
           <Sparkline
             points={row.intraday?.points ?? row.quote?.points ?? []}
-            offsets={row.intraday?.offsets ?? row.quote?.offsets}
-            sessionMinutes={row.intraday?.sessionMinutes ?? row.quote?.sessionMinutes}
             baseline={row.intraday?.previousClose ?? row.quote?.previousClose}
             width={80}
             height={28}
