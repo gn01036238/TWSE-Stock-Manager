@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Plus, RotateCcw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sparkline } from '@/components/sparkline';
 import { useIndexSymbols, useIndices } from '@/hooks/useIndices';
 import { useMargin } from '@/hooks/useMargin';
+import { cn } from '@/lib/utils';
 import { gainTextClass } from '@/lib/colors';
+
+/** 移動超過這個距離才算拖曳，免得單純點一下就重排 */
+const DRAG_THRESHOLD = 4;
 
 function formatIndexValue(value: number): string {
   return value.toLocaleString('zh-TW', {
@@ -40,27 +44,100 @@ function MarginChip({
 
 /** 單列指數條，刻意壓低高度，讓總覽首屏能看到持股表格 */
 export function MarketIndices({ className = '' }: { className?: string }) {
-  const { symbols, addSymbol, removeSymbol, resetSymbols, loaded } = useIndexSymbols();
+  const { symbols, addSymbol, removeSymbol, moveSymbol, resetSymbols, loaded } =
+    useIndexSymbols();
   const { data, isLoading } = useIndices(loaded ? symbols : []);
   const { data: margin } = useMargin();
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState(false);
+
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [dragSymbol, setDragSymbol] = useState<string | null>(null);
+  const [overSymbol, setOverSymbol] = useState<string | null>(null);
+  // onUp 是原生事件的 closure，讀不到最新的 state，另外用 ref 記一份
+  const overRef = useRef<string | null>(null);
+
+  const setOver = (symbol: string | null) => {
+    overRef.current = symbol;
+    setOverSymbol(symbol);
+  };
 
   const submit = () => {
     addSymbol(draft);
     setDraft('');
   };
 
+  function startReorder(event: React.PointerEvent, symbol: string) {
+    if (event.button !== 0) return;
+
+    const row = rowRef.current;
+    if (!row) return;
+
+    // 指標條會換行，命中判斷要同時看 X 與 Y；拖曳中版面不變，開始時量一次就夠
+    const rects = symbols
+      .map((s) => {
+        const el = row.querySelector<HTMLElement>(`[data-index-symbol="${CSS.escape(s)}"]`);
+        const rect = el?.getBoundingClientRect();
+        return rect ? { symbol: s, rect } : null;
+      })
+      .filter((r): r is { symbol: string; rect: DOMRect } => r != null);
+
+    const state = { startX: event.clientX, startY: event.clientY, active: false };
+
+    const onMove = (moveEvent: PointerEvent) => {
+      if (!state.active) {
+        const moved = Math.hypot(
+          moveEvent.clientX - state.startX,
+          moveEvent.clientY - state.startY
+        );
+        if (moved < DRAG_THRESHOLD) return;
+        state.active = true;
+        setDragSymbol(symbol);
+      }
+      const hit = rects.find(
+        ({ rect }) =>
+          moveEvent.clientX >= rect.left &&
+          moveEvent.clientX <= rect.right &&
+          moveEvent.clientY >= rect.top &&
+          moveEvent.clientY <= rect.bottom
+      );
+      setOver(hit && hit.symbol !== symbol ? hit.symbol : null);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (state.active && overRef.current) {
+        moveSymbol(symbol, overRef.current);
+      }
+      setDragSymbol(null);
+      setOver(null);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
   return (
     <div className={className}>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+      <div ref={rowRef} className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
         <span className="text-xs text-muted-foreground">參考指標</span>
 
         {(loaded ? symbols : []).map((symbol) => {
           const quote = data?.[symbol];
 
           return (
-            <div key={symbol} className="flex items-center gap-1.5">
+            <div
+              key={symbol}
+              data-index-symbol={symbol}
+              onPointerDown={(event) => startReorder(event, symbol)}
+              className={cn(
+                'flex cursor-grab touch-pan-y items-center gap-1.5 rounded select-none',
+                dragSymbol === symbol && 'opacity-40',
+                // outline 畫在框外，底色才有留白又不會把旁邊的指標推開
+                overSymbol === symbol && 'bg-accent outline-4 outline-accent'
+              )}
+            >
               <span className="max-w-[9rem] truncate text-xs text-muted-foreground">
                 {quote?.name ?? symbol}
               </span>
@@ -93,6 +170,7 @@ export function MarketIndices({ className = '' }: { className?: string }) {
               {editing && (
                 <button
                   type="button"
+                  onPointerDown={(event) => event.stopPropagation()}
                   onClick={() => removeSymbol(symbol)}
                   className="text-muted-foreground hover:text-destructive"
                   aria-label={`移除 ${symbol}`}

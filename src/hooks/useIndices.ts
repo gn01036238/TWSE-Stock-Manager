@@ -65,7 +65,22 @@ export function useIndexSymbols() {
 
   const resetSymbols = useCallback(() => persist(DEFAULT_INDEX_SYMBOLS), [persist]);
 
-  return { symbols, addSymbol, removeSymbol, resetSymbols, loaded };
+  /** 把 symbol 插到 target 的位置（往後拖時放在 target 之後），供拖曳排序使用 */
+  const moveSymbol = useCallback((symbol: string, target: string) => {
+    setSymbols((prev) => {
+      const from = prev.indexOf(symbol);
+      const to = prev.indexOf(target);
+      if (from < 0 || to < 0 || from === to) return prev;
+
+      const next = [...prev];
+      next.splice(from, 1);
+      next.splice(to, 0, symbol);
+      writeStoredSymbols(next);
+      return next;
+    });
+  }, []);
+
+  return { symbols, addSymbol, removeSymbol, moveSymbol, resetSymbols, loaded };
 }
 
 export function useIndices(symbols: string[]) {
