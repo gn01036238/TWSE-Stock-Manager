@@ -22,7 +22,8 @@ import { Sparkline } from '@/components/sparkline';
 import { Candlestick } from '@/components/candlestick';
 import { DayChange } from '@/components/day-change';
 import { DataDateTag } from '@/components/data-date-tag';
-import { DividendHistory, type DividendRecord } from '@/components/dividend-history';
+import { type DividendRecord } from '@/components/dividend-history';
+import { StockDetail } from '@/components/stock-detail';
 import { MarketIndices } from '@/components/market-indices';
 import { PortfolioHistoryChart } from '@/components/portfolio-history-chart';
 import { DOWN_TEXT, UP_TEXT, gainBadgeClass, gainTextClass } from '@/lib/colors';
@@ -85,6 +86,14 @@ function SummaryStat({
       </div>
       {subValue && <p className={`text-[11px] ${trendColor}`}>{subValue}</p>}
     </div>
+  );
+}
+
+/** 持股與台股觀察標的可以展開看走勢／配息／交易；美股等只有報價、加權指數列也沒東西可展開 */
+function isExpandable(row: OverviewRow): boolean {
+  return (
+    row.holding != null ||
+    (row.watchlistSymbol != null && isTwWatchlistSymbol(row.watchlistSymbol))
   );
 }
 
@@ -362,13 +371,13 @@ export default function Dashboard() {
       {
         id: 'stock',
         header: '股票',
-        headerText: '股票（點擊該列可展開配息紀錄）',
+        headerText: '股票（點擊該列可展開走勢／日K、配息與交易紀錄）',
         width: 150,
         minWidth: 60,
         frozen: true,
         cell: (row, { expanded }) => (
           <div className="flex items-center gap-1">
-            {row.holding ? (
+            {isExpandable(row) ? (
               expanded ? (
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
@@ -418,7 +427,9 @@ export default function Dashboard() {
         header: '日K',
         headerText: '日K（近 20 個交易日，紅＝收盤高於開盤；滑過看最新一根開高低收）',
         width: 120,
-        cell: (row) => <Candlestick bars={row.candles} width={110} height={30} />,
+        // 吃掉表格右側多出來的空白，K 棒跟著拉開
+        fill: true,
+        cell: (row) => <Candlestick bars={row.candles} height={30} />,
       },
       {
         id: 'changePercent',
@@ -775,7 +786,14 @@ export default function Dashboard() {
               rowGroup={(row) => (row.holding ? 'holding' : 'watchlist')}
               onMoveRow={moveRow}
               renderExpanded={(row) =>
-                row.holding ? <DividendHistory records={row.dividends} /> : null
+                isExpandable(row) ? (
+                  <StockDetail
+                    ticker={row.ticker}
+                    intraday={row.intraday}
+                    price={row.price}
+                    dividends={row.dividends}
+                  />
+                ) : null
               }
               settingsExtra={
                 <label className="flex cursor-pointer items-center gap-1.5 py-1 text-xs">
@@ -794,7 +812,7 @@ export default function Dashboard() {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        持股 {holdings.length} 檔{watchlistEntries.length > 0 ? `，觀察 ${watchlistEntries.length} 檔` : ''}，點任一列可展開配息紀錄。表頭可拖曳調整順序、拖右緣調欄寬，設定會記在這個瀏覽器裡。
+        持股 {holdings.length} 檔{watchlistEntries.length > 0 ? `，觀察 ${watchlistEntries.length} 檔` : ''}，點持股或台股觀察標的那一列可展開走勢／日K（可切換區間，含成交量、外資、投信、主力買賣超）、配息紀錄與交易紀錄。表頭可拖曳調整順序、拖右緣調欄寬，設定會記在這個瀏覽器裡。
         每列最左邊的把手可拖曳調整順序，持股與觀察清單分開排序，不能互相拖過去。
         今日損益的基準為昨收，當天才買進的部位改以成交價計算，未計手續費。
         日K 為近 20 個交易日，最後一根是當日（盤中還會變動）；價量欄的「價」紅漲綠跌、「量」紅為量增綠為量縮。

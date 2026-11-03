@@ -71,6 +71,14 @@ export function dividendColumns(options: { showStock?: boolean } = {}): ColumnDe
       cell: (record) => record.paymentDate.slice(0, 10),
     },
     {
+      id: 'sharesHeld',
+      header: '除息時持股',
+      headerText: '除權息日前一交易日收盤時的持股數，股利就是照這個數字配的',
+      width: 95,
+      align: 'right',
+      cell: (record) => record.sharesHeld.toLocaleString(),
+    },
+    {
       id: 'amount',
       header: '每股配息',
       headerText: '每股現金股利（元）',
@@ -138,14 +146,6 @@ export function dividendColumns(options: { showStock?: boolean } = {}): ColumnDe
         record.yieldPercent != null ? formatPercent(record.yieldPercent) : dash,
     },
     {
-      id: 'sharesHeld',
-      header: '除息時持股',
-      headerText: '除權息日前一交易日收盤時的持股數，股利就是照這個數字配的',
-      width: 95,
-      align: 'right',
-      cell: (record) => record.sharesHeld.toLocaleString(),
-    },
-    {
       id: 'income',
       header: '股利收入',
       headerText: '現金股利 = 除息時持股 × 每股配息（未扣二代健保費）',
@@ -209,19 +209,15 @@ export function DividendHistory({ records }: { records: DividendRecord[] }) {
   const totalShares = records.reduce((sum, record) => sum + record.sharesGained, 0);
 
   return (
-    <div
-      className="rounded-md border bg-muted/30 p-3"
-      // 這塊在總覽表格的展開列裡，整列跟表格一樣寬；點欄位設定或拖曳欄寬時
-      // 不要讓事件冒泡上去把該列收起來
-      onClick={(event) => event.stopPropagation()}
-    >
+    <div>
       <p className="mb-2 text-sm font-medium">
         配息紀錄（{records.length} 次，累計 {formatCurrency(totalIncome)}，實發{' '}
         {formatCurrency(totalNet)}
         {totalShares > 0 && `，配股 ${totalShares.toLocaleString()} 股`}）
       </p>
       <DataTable
-        tableId="dividend-history"
+        // 移進個股詳細的分頁後換一組 key，舊的欄位設定（可能把除息時持股藏起來了）不沿用
+        tableId="stock-detail-dividends"
         columns={columns}
         rows={rows}
         rowKey={dividendRowKey}

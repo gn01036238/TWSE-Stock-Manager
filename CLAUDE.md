@@ -28,6 +28,7 @@ src/
 ├── components/
 │   ├── ui/                # Shadcn/ui components
 │   ├── data-table.tsx     # 欄寬可拖曳、欄位可拖曳排序的表格（設定存 localStorage）
+│   ├── stock-detail.tsx   # 總覽展開列的分頁：走勢／日K（可切區間，含量與法人／主力）、配息紀錄、交易紀錄
 │   ├── dividend-history.tsx # 配息紀錄表格與共用欄位定義（總覽展開列／股利收入頁共用）
 │   ├── sparkline.tsx      # 走勢圖；給了 offsets/sessionMinutes 就用固定的 09:00–13:30 X 軸
 │   ├── navbar.tsx         # Navigation
@@ -86,6 +87,10 @@ npm run lint     # Run ESLint
   `Sparkline` 用它畫**固定的 09:00–13:30 X 軸**，盤中只填到現在為止，不把 N 個點攤滿寬度
 - 樣本只活在記憶體：伺服器重啟後那段空窗要等 Yahoo 的 K 棒補回來，中間會缺一小段線。
   **價格數字不受影響**
+- 每分鐘成交量（`volumes`，張）：前段用 Yahoo 1m K 棒的量（股數 ÷ 1000），尾巴用 TWSE `v`（累積量）
+  逐樣本相減，接縫處以 Yahoo 量的加總當起點。取樣漏掉的分鐘會併進下一根。Yahoo 13:30 那根是 0，
+  收盤後以 TWSE 的 `tv`（最後一盤成交量＝收盤集合競價）補回。不要用「當日總量 − 前面加總」：
+  Yahoo 分鐘量含零股，加總常比 TWSE 總量大（0050 差了三萬多張）
 - 加權指數也記在同一個 store（key 用 `^TWII`），`參考指數` 的台股那格改讀 TWSE `t00`，
   才不會跟表格裡的加權指數列打架
 
@@ -140,6 +145,17 @@ npm run lint     # Run ESLint
 - `GET /api/chips?tickers=` - 成交量、量比、價量型態、三大法人與主力買賣超（含加權指數列）
 - `GET /api/candles?tickers=&limit=` - 日 K（OHLC）序列；`0000` 代表加權指數（Yahoo `^TWII`）。
   與量比共用 `lib/daily-bars.ts` 的抓取與快取，同一檔不會重複問 Yahoo
+- `GET /api/stock-history?ticker=&range=1m|3m|6m|1y` - 總覽展開列的大圖：日 K ＋ 均線（`ma20` 月線、`ma60` 季線、
+  `ma100` 20 週線、`ma240` 年線，收盤價簡單平均）＋ 逐日外資／投信／自營商買賣超。
+  日 K 會比區間多抓約 380 天，最左邊那天的年線才算得出來
+- `GET /api/stock-history/major?ticker=&range=` - 逐日主力買賣超；要一天一個請求，跟上面分開抓，圖先畫出來再補
+
+### 個股歷史籌碼（`lib/stock-history.ts`）
+
+- 逐日法人與主力走**富邦 DJ**（`fubon-ebrokerdj.fbs.com.tw`，Big5 編碼）。Yahoo 的「主力進出」只有最新一天，
+  總覽表格的當日主力仍走 Yahoo（`lib/major.ts`），兩邊定義相同（前 15 大買超 − 前 15 大賣超）
+- 法人 `zcl` 一次查整段日期（民國年日期）；主力 `zco` 只能逐日查，一年份第一次約 10 秒，
+  過去的交易日查到就永久留在記憶體，當日要 15:00 後才去問
 
 ## Database
 

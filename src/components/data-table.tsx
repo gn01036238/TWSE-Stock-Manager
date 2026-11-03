@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useElementWidth } from '@/hooks/useElementWidth';
 import { useTableLayout } from '@/hooks/useTableLayout';
 import { cn } from '@/lib/utils';
 
@@ -33,6 +34,8 @@ export interface ColumnDef<T> {
   frozen?: boolean;
   /** 預設隱藏 */
   hidden?: boolean;
+  /** 視窗比欄位總寬還寬時由這欄吸收多出來的空間（欄寬變成最小寬度） */
+  fill?: boolean;
   cell: (row: T, context: CellContext) => React.ReactNode;
   /** 整欄套用的 className（顏色、字體等） */
   className?: string;
@@ -59,6 +62,8 @@ interface DataTableProps<T> {
 
 const DRAG_THRESHOLD = 4;
 const ROW_HANDLE_WIDTH = 22;
+/** 展開列儲存格的內距（p-3） */
+const EXPANDED_PADDING = 12;
 
 /**
  * 欄寬可拖曳、欄位可拖曳排序、可隱藏、可凍結的表格；設定存在瀏覽器，重開也還在。
@@ -100,6 +105,8 @@ export function DataTable<T>({
 
   const widthOf = (column: ColumnDef<T>) => layout.widths[column.id] ?? column.width;
   const totalWidth = visible.reduce((sum, column) => sum + widthOf(column), 0);
+  /** 有欄位負責吸收空白時，就不用在最右邊補空欄 */
+  const hasFill = visible.some((column) => column.fill);
 
   /** 有拖曳把手時，凍結欄要讓出最左邊那一小欄的寬度 */
   const handleWidth = onMoveRow ? ROW_HANDLE_WIDTH : 0;
@@ -121,6 +128,7 @@ export function DataTable<T>({
   }, [visible, frozenSet, layout.widths, handleWidth]);
 
   const headerRowRef = useRef<HTMLTableRowElement>(null);
+  const [rootRef, rootWidth] = useElementWidth<HTMLDivElement>();
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const overIdRef = useRef<string | null>(null);
@@ -302,7 +310,7 @@ export function DataTable<T>({
   };
 
   return (
-    <div className="space-y-1">
+    <div ref={rootRef} className="space-y-1">
       <div className="flex items-center justify-end gap-3">
         {isCustomized && (
           <button
@@ -384,10 +392,10 @@ export function DataTable<T>({
         <colgroup>
           {onMoveRow && <col style={{ width: handleWidth }} />}
           {visible.map((column) => (
-            <col key={column.id} style={{ width: widthOf(column) }} />
+            <col key={column.id} style={column.fill ? undefined : { width: widthOf(column) }} />
           ))}
           {/* 視窗比欄位總寬還寬時，讓多出來的空間由這欄吸收，欄寬才不會被拉伸 */}
-          <col />
+          {!hasFill && <col />}
         </colgroup>
         <TableHeader>
           <TableRow ref={headerRowRef} className="hover:bg-transparent">
@@ -419,7 +427,7 @@ export function DataTable<T>({
                 />
               </TableHead>
             ))}
-            <TableHead aria-hidden />
+            {!hasFill && <TableHead aria-hidden />}
           </TableRow>
         </TableHeader>
         <TableBody ref={bodyRef}>
@@ -456,13 +464,22 @@ export function DataTable<T>({
                     </TableCell>
                   )}
                   {renderCells(row, isExpanded)}
-                  <TableCell aria-hidden />
+                  {!hasFill && <TableCell aria-hidden />}
                 </TableRow>
 
                 {isExpanded && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={visible.length + 1 + (onMoveRow ? 1 : 0)} className="p-3">
-                      {expandedContent}
+                    <TableCell colSpan={visible.length + (hasFill ? 0 : 1) + (onMoveRow ? 1 : 0)} className="p-3">
+                      {/* 表格比視窗寬時，展開的內容維持在看得到的寬度裡、不跟著橫向捲走 */}
+                      <div
+                        className="sticky"
+                        style={{
+                          left: EXPANDED_PADDING,
+                          width: rootWidth > 0 ? rootWidth - EXPANDED_PADDING * 2 : undefined,
+                        }}
+                      >
+                        {expandedContent}
+                      </div>
                     </TableCell>
                   </TableRow>
                 )}
@@ -477,7 +494,7 @@ export function DataTable<T>({
                 <TableCell aria-hidden style={{ left: 0 }} className="sticky z-10 frozen-cell p-0" />
               )}
               {renderCells(footerRow)}
-              <TableCell aria-hidden />
+              {!hasFill && <TableCell aria-hidden />}
             </TableRow>
           </TableFooter>
         )}

@@ -1,5 +1,6 @@
 'use client';
 
+import { useElementWidth } from '@/hooks/useElementWidth';
 import { DOWN_HEX, UP_HEX } from '@/lib/colors';
 import type { DailyBar } from '@/types';
 
@@ -71,17 +72,43 @@ export function DayCandle({
 
 /**
  * 表格裡的迷你日 K 棒圖。最後一根是最新交易日（盤中還會動），
- * 滑過去可以看最新一根的開高低收。
+ * 滑過去可以看最新一根的開高低收。沒給 width 就量外框寬度撐滿。
  */
 export function Candlestick({
   bars,
-  width = 110,
+  width: fixedWidth,
   height = 30,
   className = '',
 }: {
   bars: DailyBar[];
   width?: number;
   height?: number;
+  className?: string;
+}) {
+  const [containerRef, measuredWidth] = useElementWidth<HTMLDivElement>();
+
+  if (fixedWidth == null) {
+    return (
+      <div ref={containerRef} className={`w-full ${className}`} style={{ height }}>
+        {measuredWidth > 0 && (
+          <CandlestickChart bars={bars} width={measuredWidth} height={height} />
+        )}
+      </div>
+    );
+  }
+
+  return <CandlestickChart bars={bars} width={fixedWidth} height={height} className={className} />;
+}
+
+function CandlestickChart({
+  bars,
+  width,
+  height,
+  className = '',
+}: {
+  bars: DailyBar[];
+  width: number;
+  height: number;
   className?: string;
 }) {
   if (!bars || bars.length === 0) {
@@ -103,9 +130,10 @@ export function Candlestick({
   const usableHeight = height - padding * 2;
   const toY = (value: number) => padding + (1 - (value - min) / range) * usableHeight;
 
-  // 每根 K 棒的水平間距；實體佔 70%，留一點縫才看得出是幾根
+  // 每根 K 棒的水平間距；實體佔 70%，留一點縫才看得出是幾根。
+  // 欄位拉很寬時實體寬度封頂，不然 K 棒會胖成方塊
   const pitch = width / bars.length;
-  const bodyWidth = Math.max(1, pitch * 0.7);
+  const bodyWidth = Math.min(8, Math.max(1, pitch * 0.7));
 
   const last = bars[bars.length - 1];
 

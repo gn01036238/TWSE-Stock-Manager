@@ -25,15 +25,19 @@ async function fetchBars(symbol: string): Promise<YahooBars | null> {
     interval: '1m',
   });
 
-  const raw = (result.quotes ?? []) as { date?: Date; close?: number | null }[];
+  const raw = (result.quotes ?? []) as {
+    date?: Date;
+    close?: number | null;
+    volume?: number | null;
+  }[];
   const meta = result.meta as unknown as Record<string, unknown>;
 
   const quotes = raw
     .filter(
-      (q): q is { date: Date; close: number } =>
+      (q): q is { date: Date; close: number; volume?: number | null } =>
         q?.close != null && !Number.isNaN(q.close) && q.date != null
     )
-    .map((q) => ({ date: new Date(q.date), close: q.close }));
+    .map((q) => ({ date: new Date(q.date), close: q.close, volume: q.volume ?? null }));
 
   if (quotes.length === 0) return null;
 
@@ -44,7 +48,12 @@ async function fetchBars(symbol: string): Promise<YahooBars | null> {
     tradingDate,
     bars: quotes
       .filter((q) => taipeiDateKey(q.date) === tradingDate)
-      .map((q) => ({ bucket: toBucket(q.date), price: q.close })),
+      // Yahoo 的量是股數，換成張
+      .map((q) => ({
+        bucket: toBucket(q.date),
+        price: q.close,
+        volume: q.volume != null && q.volume >= 0 ? q.volume / 1000 : null,
+      })),
     // 官方昨收。注意 chartPreviousClose 是查詢區間之前的收盤價，不是昨收
     previousClose: typeof meta?.previousClose === 'number' ? meta.previousClose : null,
   };
@@ -81,9 +90,32 @@ function toSeries(samples: LiveSample[], tradingDate: string) {
 
   return {
     points: samples.map((sample) => sample.price),
+    volumes: samples.map((sample) => sample.volume ?? null),
     offsets: samples.map((sample) => sample.bucket - openBucket),
     sessionMinutes: SESSION_MINUTES,
   };
+}
+
+/**
+ * Yahoo 的 13:30 那根 1 分鐘 K 量是 0，收盤集合競價的量不在裡面。
+ * 收盤後 TWSE 的 tv（最後一盤成交量）就是集合競價的量，直接補回最後一根。
+ * 不能用「當日總量 − 前面每分鐘的量」：Yahoo 的分鐘量含零股，加總常常比 TWSE 的總量還大
+ */
+function fillClosingAuction(series: ReturnType<typeof toSeries>, quote?: StockPrice) {
+  const last = series.volumes.length - 1;
+  if (last < 0 || series.offsets[last] < SESSION_MINUTES || !quote) return;
+
+  if (quote.lastTradeVolume != null && quote.lastTradeVolume >= 0) {
+    series.volumes[last] = quote.lastTradeVolume;
+    return;
+  }
+
+  if (!quote.volume) return;
+  const before = series.volumes
+    .slice(0, last)
+    .reduce<number>((sum, volume) => sum + (volume ?? 0), 0);
+  const rest = quote.volume - before;
+  if (rest >= 0) series.volumes[last] = rest;
 }
 
 export async function fetchIntradaySeries(
@@ -106,9 +138,11 @@ export async function fetchIntradaySeries(
     const samples = mergeWithLive(ticker, tradingDate, isToday ? yahoo!.bars : []);
 
     if (samples.length > 0) {
+      const series = toSeries(samples, tradingDate);
+      fillClosingAuction(series, quote);
       map[ticker] = {
         ticker,
-        ...toSeries(samples, tradingDate),
+        ...series,
         // 昨收也以 TWSE 為準，Yahoo 落後時它的 previousClose 會是前天的
         previousClose: quote?.previousClose ?? yahoo?.previousClose ?? samples[0].price,
         tradingDate,

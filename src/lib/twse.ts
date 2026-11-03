@@ -216,7 +216,9 @@ export async function fetchStockPrices(tickers: string[]): Promise<Map<string, S
     const tradingDate = misTradingDate(item?.d);
 
     // 盤中順手留樣本，Yahoo 還沒給今天的 K 棒時就靠它畫「今日走勢」
-    if (marketOpen && tradingDate) recordLivePrice(ticker, tradingDate, currentPrice, now);
+    if (marketOpen && tradingDate) {
+      recordLivePrice(ticker, tradingDate, currentPrice, now, num(item?.v));
+    }
 
     prices.set(ticker, {
       ticker,
@@ -230,6 +232,7 @@ export async function fetchStockPrices(tickers: string[]): Promise<Map<string, S
       low: num(item?.l) ?? yahoo?.low ?? currentPrice,
       // 一律以「張」為單位：TWSE 的 v 已是張，Yahoo 給的是股數
       volume: num(item?.v) ?? (yahoo?.volume != null ? yahoo.volume / 1000 : 0),
+      lastTradeVolume: num(item?.tv),
       tradingDate,
       updatedAt: now,
     });

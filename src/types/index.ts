@@ -71,6 +71,8 @@ export interface StockPrice {
   high: number;
   low: number;
   volume: number;
+  /** 最近一盤的成交量（張，TWSE 的 tv）；收盤後就是收盤集合競價的量。Yahoo 備援時為 null */
+  lastTradeVolume?: number | null;
   /** 報價所屬交易日（TWSE 給的），台北時區 YYYY-MM-DD；只有 Yahoo 備援時為 null */
   tradingDate: string | null;
   updatedAt: Date;
@@ -83,6 +85,8 @@ export type IntradaySource = 'yahoo' | 'live';
 export interface IntradaySeries {
   ticker: string;
   points: number[];
+  /** 每個點那一分鐘的成交量（張），與 points 等長；不知道的為 null */
+  volumes?: (number | null)[];
   /** 每個點距離當日開盤的分鐘數，與 points 等長 */
   offsets: number[];
   /** 交易時段長度（分鐘），走勢圖的 X 軸固定畫成 0 ~ 這個值 */
@@ -110,6 +114,40 @@ export interface DailyBar {
 export interface CandleSeries {
   ticker: string;
   bars: DailyBar[];
+}
+
+/** 個股詳細圖表可選的時間區間 */
+export type HistoryRange = '1m' | '3m' | '6m' | '1y';
+
+/** 收盤價的簡單移動平均；往前不足 N 個交易日時為 null */
+export interface MovingAverages {
+  /** 月線（20 日） */
+  ma20: number | null;
+  /** 季線（60 日） */
+  ma60: number | null;
+  /** 20 週均線（100 日） */
+  ma100: number | null;
+  /** 年線（240 日） */
+  ma240: number | null;
+}
+
+/** 個股詳細圖表的一天：日 K、均線 ＋ 三大法人買賣超（張）；法人資料還沒出來的那天為 null */
+export interface StockHistoryDay extends DailyBar, MovingAverages {
+  foreign: number | null;
+  trust: number | null;
+  dealer: number | null;
+}
+
+export interface StockHistoryResponse {
+  ticker: string;
+  /** 舊的在前 */
+  days: StockHistoryDay[];
+}
+
+/** 每個交易日的主力買賣超（張）；key 是 YYYY-MM-DD，分點資料還沒出來或抓不到為 null */
+export interface MajorHistoryResponse {
+  ticker: string;
+  flows: Record<string, number | null>;
 }
 
 /** 總覽的參考指數報價（費半、KOSPI、加權指數…） */
@@ -307,6 +345,7 @@ export interface TWseStockInfo {
   h: string;  // High
   l: string;  // Low
   v: string;  // Volume
+  tv?: string; // 最近一盤的成交量（張）；收盤後就是收盤集合競價的量
   d: string;  // Date
   t: string;  // Time
   o?: string; // Open

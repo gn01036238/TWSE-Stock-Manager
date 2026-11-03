@@ -14,16 +14,26 @@ const BUCKET_MS = 60 * 1000;
 const MAX_POINTS = 400;
 
 export interface LiveSample {
-  /** 時間桶編號 = floor(epoch ms / 5 分鐘) */
+  /** 時間桶編號 = floor(epoch ms / 1 分鐘) */
   bucket: number;
   price: number;
+  /** 這一分鐘的成交量（張）；不知道時為 null 或不給 */
+  volume?: number | null;
+}
+
+/** store 裡存的是當下的累積成交量，每分鐘的量等合併時再相減算出來 */
+interface StoredSample {
+  bucket: number;
+  price: number;
+  /** 當日累積成交量（張），TWSE MIS 的 v */
+  cumVolume: number | null;
 }
 
 interface Series {
   /** 樣本所屬交易日，台北時區 YYYY-MM-DD */
   date: string;
   /** 舊的在前 */
-  samples: LiveSample[];
+  samples: StoredSample[];
 }
 
 const store = new Map<string, Series>();
@@ -38,12 +48,14 @@ export function toBucket(date: Date): number {
  * 但要等桶子換了才會多一個點。
  * @param key 個股用 ticker，指數用它的 symbol（例如 ^TWII）
  * @param date 報價所屬交易日，台北時區 YYYY-MM-DD
+ * @param cumVolume 當日累積成交量（張）；指數沒有就不給
  */
 export function recordLivePrice(
   key: string,
   date: string,
   price: number,
-  at: Date = new Date()
+  at: Date = new Date(),
+  cumVolume: number | null = null
 ): void {
   if (!(price > 0)) return;
 
@@ -57,25 +69,54 @@ export function recordLivePrice(
   const bucket = toBucket(at);
   const last = series.samples[series.samples.length - 1];
 
-  if (last && last.bucket === bucket) last.price = price;
-  else series.samples.push({ bucket, price });
+  if (last && last.bucket === bucket) {
+    last.price = price;
+    if (cumVolume != null) last.cumVolume = cumVolume;
+  } else {
+    series.samples.push({ bucket, price, cumVolume });
+  }
 
   if (series.samples.length > MAX_POINTS) {
     series.samples.splice(0, series.samples.length - MAX_POINTS);
   }
 }
 
-/** 指定交易日累積到的樣本；沒有該日的資料回空陣列 */
-export function getLiveSamples(key: string, date: string): LiveSample[] {
+function getStored(key: string, date: string): StoredSample[] {
   const series = store.get(key);
   if (!series || series.date !== date) return [];
 
   return series.samples;
 }
 
+/**
+ * 累積量相減成每分鐘的量。取樣不一定每分鐘都有（沒人在看就沒人問報價），
+ * 漏掉的分鐘的量會併進下一個有樣本的那一分鐘。
+ * @param startCum 第一個樣本之前的累積量；不知道就給 null，第一個點的量留空
+ */
+function toLiveSamples(samples: StoredSample[], startCum: number | null): LiveSample[] {
+  let previous = startCum;
+
+  return samples.map((sample) => {
+    const diff =
+      sample.cumVolume != null && previous != null ? sample.cumVolume - previous : null;
+    if (sample.cumVolume != null) previous = sample.cumVolume;
+
+    return {
+      bucket: sample.bucket,
+      price: sample.price,
+      volume: diff != null && diff >= 0 ? diff : null,
+    };
+  });
+}
+
+/** 指定交易日累積到的樣本；沒有該日的資料回空陣列 */
+export function getLiveSamples(key: string, date: string): LiveSample[] {
+  return toLiveSamples(getStored(key, date), null);
+}
+
 /** 指定交易日累積到的價格序列 */
 export function getLivePoints(key: string, date: string): number[] {
-  return getLiveSamples(key, date).map((sample) => sample.price);
+  return getStored(key, date).map((sample) => sample.price);
 }
 
 /**
@@ -83,10 +124,20 @@ export function getLivePoints(key: string, date: string): number[] {
  * Yahoo 負責開盤到 20 分鐘前那段，即時樣本負責最新的尾巴。
  */
 export function mergeWithLive(key: string, date: string, bars: LiveSample[]): LiveSample[] {
-  const live = getLiveSamples(key, date);
-  if (bars.length === 0) return [...live];
+  const stored = getStored(key, date);
+  if (bars.length === 0) return toLiveSamples(stored, null);
 
   const lastBar = bars[bars.length - 1].bucket;
+  // 接縫後第一分鐘的量 = TWSE 累積量 − Yahoo 那段 K 棒的量加總
+  const yahooCum = bars.every((bar) => bar.volume != null)
+    ? bars.reduce((sum, bar) => sum + (bar.volume ?? 0), 0)
+    : null;
 
-  return [...bars, ...live.filter((sample) => sample.bucket > lastBar)];
+  return [
+    ...bars,
+    ...toLiveSamples(
+      stored.filter((sample) => sample.bucket > lastBar),
+      yahooCum
+    ),
+  ];
 }
