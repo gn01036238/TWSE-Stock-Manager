@@ -1,3 +1,5 @@
+import { promises as fs } from 'fs';
+import path from 'path';
 import type { DailyBar, HistoryRange, InstitutionalFlow, MovingAverages } from '@/types';
 import { fetchDailyBars } from './daily-bars';
 import { isAfterTaipeiHour, taipeiDateKey } from './market';
@@ -168,14 +170,66 @@ export async function fetchInstitutionalHistory(
 
 const majorCache = new Map<string, { at: number; value: number | null }>();
 
+/**
+ * 過去交易日的主力買賣超落地到 .cache/major-history.json，伺服器重啟後也不用重抓；
+ * 之後只會去補檔案裡還沒有的日子（delta）。
+ */
+const MAJOR_STORE_PATH = path.join(process.cwd(), '.cache', 'major-history.json');
+/** 超過這麼多天還查不到的日子才當成「DJ 真的沒有」而存成 null，避免把暫時性的空結果寫死 */
+const MAJOR_NULL_PERSIST_DAYS = 7;
+
+let majorStoreLoaded: Promise<void> | null = null;
+let majorStoreTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 這筆已經不會再變，可以永久保存 */
+function isSettledMajor(date: string, value: number | null, today: string): boolean {
+  if (date >= today) return false;
+  if (value != null) return true;
+  const ageDays = (Date.parse(today) - Date.parse(date)) / DAY_MS;
+  return ageDays > MAJOR_NULL_PERSIST_DAYS;
+}
+
+function loadMajorStore(): Promise<void> {
+  majorStoreLoaded ??= (async () => {
+    try {
+      const raw = await fs.readFile(MAJOR_STORE_PATH, 'utf-8');
+      const data = JSON.parse(raw) as Record<string, number | null>;
+      for (const [key, value] of Object.entries(data)) {
+        majorCache.set(key, { at: 0, value });
+      }
+    } catch {
+      // 檔案不存在或壞掉就從空的開始
+    }
+  })();
+  return majorStoreLoaded;
+}
+
+function scheduleMajorStoreSave() {
+  if (majorStoreTimer) return;
+  majorStoreTimer = setTimeout(async () => {
+    majorStoreTimer = null;
+    try {
+      const today = taipeiDateKey();
+      const data: Record<string, number | null> = {};
+      for (const [key, entry] of majorCache) {
+        if (isSettledMajor(key.split(':')[1], entry.value, today)) data[key] = entry.value;
+      }
+      await fs.mkdir(path.dirname(MAJOR_STORE_PATH), { recursive: true });
+      await fs.writeFile(MAJOR_STORE_PATH, JSON.stringify(data), 'utf-8');
+    } catch (error) {
+      console.error('Failed to save major history store:', error);
+    }
+  }, 1000);
+}
+
 async function fetchMajorOnDate(ticker: string, date: string): Promise<number | null> {
   const key = `${ticker}:${date}`;
   const cached = majorCache.get(key);
-  const isPast = date < taipeiDateKey();
+  const today = taipeiDateKey();
 
   if (cached) {
-    // 過去的交易日拿到數字就不會再變
-    if (isPast && cached.value != null) return cached.value;
+    // 已定案的過去交易日不會再變
+    if (isSettledMajor(date, cached.value, today)) return cached.value;
     if (Date.now() - cached.at < MAJOR_RETRY_TTL) return cached.value;
   }
 
@@ -194,6 +248,7 @@ async function fetchMajorOnDate(ticker: string, date: string): Promise<number | 
   const value = onDate && buy != null && sell != null ? buy - sell : null;
 
   majorCache.set(key, { at: Date.now(), value });
+  if (isSettledMajor(date, value, today)) scheduleMajorStoreSave();
   return value;
 }
 
@@ -204,6 +259,7 @@ export async function fetchMajorHistory(
   ticker: string,
   dates: string[]
 ): Promise<Record<string, number | null>> {
+  await loadMajorStore();
   const today = taipeiDateKey();
   const flows: Record<string, number | null> = {};
   const pending = dates.filter((date) => {
